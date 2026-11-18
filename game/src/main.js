@@ -55,7 +55,6 @@ const ctx = {
   world,
   traffic,
   pedestrians,
-  player: player.state,
   police,
   combat,
   missions,
@@ -685,13 +684,15 @@ function runShot(name) {
   gsap.set('#startMenu .item', { autoAlpha: 1, y: 0 });
   gsap.set('.controls span', { autoAlpha: 1 });
   gsap.set('#banner', { autoAlpha: 0 });
-  gsap.set('#toast', { autoAlpha: 1, y: 0, scale: 1 });
-  // Paint a handful of frames at one frozen time so nothing mid-tween is captured.
+  // The toast only belongs in the frame when a scene actually wrote a line into it: forcing an
+  // empty toast visible would stamp a blank pill over the title shot.
+  const toastEl = document.getElementById('toast');
+  gsap.set('#toast', { autoAlpha: toastEl.textContent.trim() ? 1 : 0, y: 0, scale: 1 });
+  // Paint a handful of frames at one frozen time so nothing mid-tween is captured. The camera
+  // stays exactly where stageShot framed it — the radar centre is not the camera.
   let painted = 0;
   function paint() {
     time = SHOT_TIME;
-    camera.x = result.radar?.x ?? camera.x;
-    camera.y = result.radar?.y ?? camera.y;
     render();
     painted += 1;
     if (painted < 5) requestAnimationFrame(paint);

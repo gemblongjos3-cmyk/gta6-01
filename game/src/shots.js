@@ -328,7 +328,12 @@ export function stageShot(name, ctx) {
     camera.zoom = 1.02;
 
     hud.hideHud();
-    hud.enterStart();
+    // Shot mode must not depend on the ticker: drive the entrance timeline straight to its
+    // final state and pin the HUD groups hidden with sets, so the framed title is the
+    // finished animation, never its first frame.
+    const entrance = hud.enterStart();
+    if (entrance) entrance.progress(1);
+    gsap.set(['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective'], { autoAlpha: 0 });
     gsap.set('#start', { autoAlpha: 1, visibility: 'visible' });
     gsap.set('#startPanel', { autoAlpha: 1, y: 0, scale: 1 });
     gsap.set('#title', { autoAlpha: 1, y: 0, letterSpacing: '-1px' });

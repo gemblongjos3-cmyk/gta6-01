@@ -766,8 +766,11 @@ export function createRenderer(canvas) {
     const radius = Math.min(view.width, view.height) * 0.36;
     const cx = view.width / 2 + Math.cos(angle) * radius;
     const cy = view.height / 2 + Math.sin(angle) * radius * 0.78;
-    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    // Save BEFORE switching to screen space: restoring afterwards must hand the world
+    // transform back to the drawables that follow, or every car and person after the
+    // arrow is painted thousands of pixels off-canvas.
     ctx.save();
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     ctx.translate(cx, cy);
     ctx.rotate(angle);
     ctx.fillStyle = color;
