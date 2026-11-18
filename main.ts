@@ -39,3 +39,4 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
+console.log('Palm Shores — an original open-world crime game for make.fun gta6-01; dossier written to ' + out);
