@@ -13,6 +13,18 @@ chase, ram and shoot. A radar minimap, cash, health and ammo HUD, synthesized We
 and a localStorage save round it out. No build step, no network requests: every file is
 static and vendored locally, GSAP included.
 
+The HUD reads like a dispatcher's desk. A **left rail** carries the mission dossier — the
+current mission's name and number, its objective, a stage bar for its steps, what comes next
+and the district — beside a **Shores PD response panel** that names every responding unit
+(OSPREY-14, SANDPIPER-22, BONEFISH-08 and the rest), derives each one's status — pursuit,
+intercept, roadblock, closing, patrol — from its real position, speed and distance, and flags
+whether the player is IN SIGHT or EVADING. **Luna** speaks on a dispatch dialogue strip with
+her own portrait, calling heat rises, nearby checkpoints and completed jobs. The **minimap**
+draws an amber route that follows the actual avenues and streets to the objective, shows
+police as heading triangles and the objective as a gold star under a district label, and a
+radio pill (WAVE 92.4 · Neon Tide) and a four-segment vehicle condition bar round out the
+cockpit.
+
 ## The story — missions
 
 One chain of **6 story missions (8 objective steps)** for Luna, from the Anchor Diner to the

@@ -2,8 +2,9 @@
 // with its actors placed on purpose and every value driven to its final state with gsap.set (never
 // a half-played tween), so the same seed always photographs the same frame. In shot mode the clock
 // is frozen too: water shimmer, neon and siren flashes all read one fixed time.
-import { CAMERA, COAST, PLAYER, ROAD } from './config.js';
+import { CAMERA, CAR, COAST, PLAYER, ROAD } from './config.js';
 import { createCar } from './vehicles.js';
+import { computePdResponse, computeRoute, meters } from './hud.js';
 
 const gsap = window.gsap;
 
@@ -42,6 +43,10 @@ export function stageShot(name, ctx) {
   gsap.set('#flash', { opacity: 0 });
   hud.endBanner();
   hud.hideObjective();
+  // The action shots wear the left rail instead of the old objective card
+  // and mission tag (both stay hidden while the rail is active); the start
+  // shot hides the rail with the rest of the HUD.
+  hud.setRailActive(name !== 'start');
   // The title and pause panels are HTML over the canvas: stay out of every framed scene.
   gsap.set('#start', { autoAlpha: 0, visibility: 'hidden' });
   gsap.set('#pause', { autoAlpha: 0, visibility: 'hidden' });
@@ -79,8 +84,9 @@ export function stageShot(name, ctx) {
       { x: avenue - 44, y: street + 500, angle: -Math.PI / 2 + 0.18, phase: 2.1 },
       { x: avenue + 96, y: street + 590, angle: -Math.PI / 2 - 0.12, phase: 3.4 },
     ];
+    const stagedCruisers = [];
     for (const cruiser of cruisers) {
-      placeCar(ctx, {
+      stagedCruisers.push(placeCar(ctx, {
         x: cruiser.x,
         y: cruiser.y,
         angle: cruiser.angle,
@@ -88,7 +94,7 @@ export function stageShot(name, ctx) {
         model: 'cruiser',
         color: '#e8eef5',
         sirenPhase: cruiser.phase,
-      });
+      }));
     }
     police.setWanted(4);
 
@@ -152,14 +158,41 @@ export function stageShot(name, ctx) {
     hud.setObjective('Heat Line · Mission 5 of 6', 'Shake the police — get the wanted level to zero', '1:12');
     hud.setMissionTag('Sunset Avenue · Downtown');
     hud.setSpeed(112, 'Sprint Coupe', true);
+    hud.setCarCondition(car.health, car.maxHealth ?? CAR.health);
+    hud.setRadio('WAVE 92.4 · NEON TIDE', 'Coral Static', 'Velvet Gulls');
     hud.toast('Wanted 4 — the whole precinct is on you', 9);
     hud.hint('');
+    // The rail, staged from the same state: dossier for mission 5 (stage
+    // bar = Heat Line's own steps), the PD panel computed from the three
+    // staged cruisers by the live play function, and Luna's line.
+    const marker = { x: avenue + 34, y: street - 900 };
+    hud.setDossier({
+      header: 'HEAT LINE · MISSION 5 OF 6',
+      objective: 'Shake the police — get the wanted level to zero',
+      stageFilled: 0,
+      stageTotal: ctx.missions.script[4].steps.length,
+      stageIndex: 0,
+      next: ctx.missions.script[5].title,
+      timer: '1:12',
+      district: 'Sunset Avenue · Downtown',
+    });
+    hud.setResponse(computePdResponse(stagedCruisers, { x: car.x, y: car.y, heading: -Math.PI / 2 }, 4));
+    hud.say('Whole precinct is rolling behind you. Keep the avenue — do not let them box you in.');
+    hud.setDistrict('DOWNTOWN');
     return {
       wanted: 4,
-      marker: { x: avenue + 34, y: street - 900 },
+      marker,
       speed: 112,
       carName: 'Sprint Coupe',
-      radar: { x: car.x, y: car.y, aim: -Math.PI / 2, rotate: 0 },
+      radar: {
+        x: car.x,
+        y: car.y,
+        aim: -Math.PI / 2,
+        rotate: 0,
+        route: computeRoute(car, marker),
+        police: stagedCruisers,
+        traffic: traffic.cars.filter((other) => other.kind !== 'police'),
+      },
       bannerVisible: false,
     };
   }
@@ -225,8 +258,10 @@ export function stageShot(name, ctx) {
     }
 
     // Two cruisers rolling along the promenade, still a way off.
-    placeCar(ctx, { x: door.x + 420, y: COAST.beachTop - 30, angle: Math.PI, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 0.6 });
-    placeCar(ctx, { x: door.x - 380, y: COAST.beachTop - 30, angle: 0, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 2.8 });
+    const stagedCruisers = [
+      placeCar(ctx, { x: door.x + 420, y: COAST.beachTop - 30, angle: Math.PI, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 0.6 }),
+      placeCar(ctx, { x: door.x - 380, y: COAST.beachTop - 30, angle: 0, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 2.8 }),
+    ];
     placeCar(ctx, { x: door.x + 190, y: COAST.beachTop + 24, angle: Math.PI / 2, kind: 'traffic', color: '#8a6fc0', model: 'van' });
     police.setWanted(2);
 
@@ -241,13 +276,38 @@ export function stageShot(name, ctx) {
     hud.setObjective('Pier Nine · Mission 4 of 6', 'Clear the warehouse yard — 3 targets', '0:37');
     hud.setMissionTag('Pier Nine · Shrimp Row');
     hud.setSpeed(0, '', false);
+    hud.setRadio('WAVE 92.4 · NEON TIDE', 'Coral Static', 'Velvet Gulls');
     hud.toast('Shots fired — the whole pier heard it', 9);
     hud.hint('');
+    // The rail: mission 4's dossier, the PD panel from the two staged
+    // cruisers (wanted 2), Luna's warning.
+    const marker = { x: door.x + 30, y: door.y + 40 };
+    hud.setDossier({
+      header: 'PIER NINE · MISSION 4 OF 6',
+      objective: 'Clear the warehouse yard — 3 targets',
+      stageFilled: 0,
+      stageTotal: ctx.missions.script[3].steps.length,
+      stageIndex: 0,
+      next: ctx.missions.script[4].title,
+      timer: '0:37',
+      district: 'Pier Nine · Shrimp Row',
+    });
+    hud.setResponse(computePdResponse(stagedCruisers, { x: player.x, y: player.y, heading: player.aim }, 2));
+    hud.say('Two cruisers on the promenade and the yard is hot. Finish the Dock Boss and move.');
+    hud.setDistrict('SHRIMP ROW');
     return {
       wanted: 2,
-      marker: { x: door.x + 30, y: door.y + 40 },
+      marker,
       speed: 0,
-      radar: { x: player.x, y: player.y, aim: player.aim, rotate: 0 },
+      radar: {
+        x: player.x,
+        y: player.y,
+        aim: player.aim,
+        rotate: 0,
+        route: computeRoute(player, marker),
+        police: stagedCruisers,
+        traffic: traffic.cars.filter((other) => other.kind !== 'police'),
+      },
       bannerVisible: false,
     };
   }
@@ -270,6 +330,7 @@ export function stageShot(name, ctx) {
     });
     van.speed = 190;
     van.driver = 'player';
+    van.health = 96;
     traffic.cars.push(van);
     player.car = van;
     player.x = van.x;
@@ -303,28 +364,57 @@ export function stageShot(name, ctx) {
       person.speed = 54;
     }
     police.setWanted(1);
-    placeCar(ctx, { x: avenue - 34, y: street - 880, angle: Math.PI / 2, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 1.1 });
+    const stagedCruisers = [
+      placeCar(ctx, { x: avenue - 34, y: street - 880, angle: Math.PI / 2, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 1.1 }),
+    ];
 
     camera.x = avenue + 10;
     camera.y = street + 40;
     camera.zoom = 0.9;
 
     const checkpoint = { x: garageDoor.x, y: garageDoor.y };
+    // One distance, computed once: the mission tag and the toast both read it.
+    const distM = meters(Math.hypot(checkpoint.x - van.x, checkpoint.y - van.y));
     hud.setWanted(1);
     hud.setCash(960);
     hud.setHealth(96, PLAYER.health);
     hud.setAmmo(12, 48, PLAYER.magazine);
     hud.setObjective('Borrowed Time · Mission 2 of 6', 'Deliver the package to Bayline Garage', '0:48');
-    hud.setMissionTag(`${Math.round(Math.hypot(checkpoint.x - van.x, checkpoint.y - van.y) / 10)} m · Bayline`);
+    hud.setMissionTag(`${distM} m · Bayline`);
     hud.setSpeed(74, 'Cargo Van', true);
-    hud.toast('Checkpoint in 980 m — keep it rolling', 9);
+    hud.setCarCondition(van.health, van.maxHealth ?? CAR.health);
+    hud.setRadio('WAVE 92.4 · NEON TIDE', 'Coral Static', 'Velvet Gulls');
+    hud.toast(`Checkpoint in ${distM} m — keep it rolling`, 9);
     hud.hint('');
+    // The rail: mission 2 on its second step (the steal is done, the
+    // garage run is live), the PD panel from the one staged cruiser, Luna.
+    hud.setDossier({
+      header: 'BORROWED TIME · MISSION 2 OF 6',
+      objective: 'Deliver the package to Bayline Garage',
+      stageFilled: 1,
+      stageTotal: ctx.missions.script[1].steps.length,
+      stageIndex: 1,
+      next: ctx.missions.script[2].title,
+      timer: '0:48',
+      district: `${distM} m · Bayline`,
+    });
+    hud.setResponse(computePdResponse(stagedCruisers, { x: van.x, y: van.y, heading: -Math.PI / 2 }, 1));
+    hud.say('Package is warm and the clock is running. Bayline Garage — keep her in one piece.');
+    hud.setDistrict('BAYLINE');
     return {
       wanted: 1,
       marker: checkpoint,
       speed: 74,
       carName: 'Cargo Van',
-      radar: { x: van.x, y: van.y, aim: -Math.PI / 2, rotate: 0 },
+      radar: {
+        x: van.x,
+        y: van.y,
+        aim: -Math.PI / 2,
+        rotate: 0,
+        route: computeRoute(van, checkpoint),
+        police: stagedCruisers,
+        traffic: traffic.cars.filter((other) => other.kind !== 'police'),
+      },
       bannerVisible: false,
       checkpoint: true,
     };

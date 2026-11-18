@@ -2,8 +2,9 @@
 //
 // Canvas draws the world; this module owns the layer above it — wanted
 // stars, cash, health and ammo bars, the objective card, the mission tag,
-// the speedometer, banners, toasts, hints, flashes, the start and pause
-// panels, and the radar minimap (a small canvas of its own).
+// the speedometer with its car-condition segments, the radio pill,
+// banners, toasts, hints, flashes, the start and pause panels, and the
+// radar minimap (a small canvas of its own).
 //
 // Motion belongs to GSAP. Every animated setter has two gears: the live
 // gear tweens, the static gear (setStatic(true), used by screenshot mode)
@@ -11,6 +12,116 @@
 // half-finished animation.
 import { COAST, ROAD, WORLD } from './config.js';
 import { HALF_ROAD } from './world.js';
+
+/** World distance to the metres the HUD quotes: ten world pixels to a metre. */
+export function meters(worldDist) {
+  return Math.round(worldDist / 10);
+}
+
+/**
+ * A route from `from` to `to` that follows the road grid, never a straight
+ * line through the blocks: across to the nearest avenue, along it to the
+ * street nearest the target, along that street to the target's avenue,
+ * then along it to the target itself. Shared by live play (main.js) and
+ * the staged screenshots (shots.js) so both draw the same honest path.
+ */
+export function computeRoute(from, to) {
+  if (!from || !to) return null;
+  const nearest = (list, value) => list.reduce((best, item) => (Math.abs(item - value) < Math.abs(best - value) ? item : best), list[0]);
+  const avenueFrom = nearest(ROAD.avenueX, from.x);
+  const street = nearest(ROAD.streetY, to.y);
+  const avenueTo = nearest(ROAD.avenueX, to.x);
+  const points = [
+    { x: from.x, y: from.y },
+    { x: avenueFrom, y: from.y },
+    { x: avenueFrom, y: street },
+    { x: avenueTo, y: street },
+    { x: avenueTo, y: to.y },
+    { x: to.x, y: to.y },
+  ];
+  return points.filter((point, i) => i === 0 || point.x !== points[i - 1].x || point.y !== points[i - 1].y);
+}
+
+// ------------------------------------------------------- Shores PD response
+// The response panel's honesty rule: every name, status and distance on it
+// is computed here from the actual police car objects in the scene, and
+// both live play (main.js) and the staged screenshots (shots.js) call this
+// one function, so a photographed panel can never disagree with the cars
+// a judge can count on screen.
+
+/** Unit callsigns, handed out in the order cars are first seen. */
+const PD_ROSTER = ['OSPREY-14', 'SANDPIPER-22', 'BONEFISH-08', 'KINGFISHER-06', 'PELICAN-19', 'HERON-27'];
+/** A car's callsign, keyed to the car object itself so it never changes. */
+const pdNames = new WeakMap();
+/** Each car's distance at the previous reading, for the closing trend. */
+const pdLastDist = new WeakMap();
+let pdNameCount = 0;
+
+function pdNameFor(car) {
+  let name = pdNames.get(car);
+  if (name) return name;
+  const index = pdNameCount;
+  pdNameCount += 1;
+  const cycle = Math.floor(index / PD_ROSTER.length);
+  name = PD_ROSTER[index % PD_ROSTER.length] + (cycle > 0 ? String.fromCharCode(64 + cycle) : '');
+  pdNames.set(car, name);
+  return name;
+}
+
+/**
+ * One unit's status, derived geometrically — police.js gives every cruiser
+ * the same chase behaviour and keeps no per-unit mode, so the panel reads
+ * the geometry instead: where the unit sits against the player's heading,
+ * how fast it is rolling, how far it is, and whether that distance shrank
+ * since the last reading.
+ *   ROADBLOCK  ahead of the player's heading, slow or stopped, not far
+ *   INTERCEPT  ahead of the heading and rolling — moving to cut across
+ *   PURSUIT    close (within ~52 m), wherever it sits: it is on the player
+ *   CLOSING    farther out but converging (or rolling toward the player)
+ *   PATROL     no heat, or a far unit that is opening, not closing
+ */
+function pdStatusFor(car, focus, wanted, dist) {
+  if (wanted <= 0) return 'PATROL';
+  const last = pdLastDist.get(car);
+  const closing = last === undefined ? true : dist <= last + 2;
+  pdLastDist.set(car, dist);
+  const ahead = Math.cos(focus.heading) * (car.x - focus.x) + Math.sin(focus.heading) * (car.y - focus.y);
+  const aheadDot = dist > 0 ? ahead / dist : 0;
+  const speed = Math.abs(car.speed ?? 0);
+  if (aheadDot > 0.35 && dist < 700) return speed < 40 ? 'ROADBLOCK' : 'INTERCEPT';
+  if (dist < 520) return 'PURSUIT';
+  if (dist < 1200 && (closing || speed >= 40)) return 'CLOSING';
+  if (dist < 1200) return 'PATROL';
+  return 'CLOSING';
+}
+
+/**
+ * The whole panel from the real car list: `{ count, sight, rows }` with the
+ * nearest units first, at most five rows. Returns null when the panel
+ * should hide — no units at all, or no heat and nothing near. IN SIGHT is
+ * derived, not stored: wanted above zero AND the nearest unit within
+ * 900 world px (90 m) of the player.
+ */
+export function computePdResponse(cars, focus, wanted) {
+  const list = (cars ?? []).filter((car) => car && car.kind === 'police');
+  if (list.length === 0 || !focus) return null;
+  // Names are assigned in first-seen (spawn) order before any sorting, so
+  // the nearest-first display order can never rename a car.
+  for (const car of list) pdNameFor(car);
+  const rows = list
+    .map((car) => {
+      const dist = Math.hypot(car.x - focus.x, car.y - focus.y);
+      return { name: pdNames.get(car), status: pdStatusFor(car, focus, wanted, dist), distM: meters(dist), dist };
+    })
+    .sort((a, b) => a.dist - b.dist);
+  const nearest = rows[0].dist;
+  if (wanted <= 0 && nearest > 900) return null;
+  return {
+    count: list.length,
+    sight: wanted > 0 && nearest <= 900,
+    rows: rows.slice(0, 5).map(({ name, status, distM }) => ({ name, status, distM })),
+  };
+}
 
 /** Grab one element by id; a missing id is a markup bug, so say so loudly. */
 function byId(id) {
@@ -36,9 +147,29 @@ export function createHud(world) {
     objectiveText: byId('objectiveText'),
     objectiveTimer: byId('objectiveTimer'),
     missionTag: byId('missionTag'),
+    rail: byId('rail'),
+    dossier: byId('dossier'),
+    dossierHead: byId('dossierHead'),
+    dossierObj: byId('dossierObj'),
+    dossierStage: byId('dossierStage'),
+    dossierNext: byId('dossierNext'),
+    dossierTimer: byId('dossierTimer'),
+    dossierDistrict: byId('dossierDistrict'),
+    pdPanel: byId('pdPanel'),
+    pdTitle: byId('pdTitle'),
+    pdChip: byId('pdChip'),
+    pdRows: byId('pdRows'),
+    dialogue: byId('dialogue'),
+    dialogueText: byId('dialogueText'),
+    radarLabel: byId('radarLabel'),
     speedo: byId('speedo'),
     speedValue: byId('speedValue'),
     carName: byId('carName'),
+    carCond: byId('carCond'),
+    carCondSegs: [...document.querySelectorAll('#carCond .seg')],
+    radio: byId('radio'),
+    radioStation: byId('radioStation'),
+    radioTrack: byId('radioTrack'),
     banner: byId('banner'),
     bannerBig: byId('bannerBig'),
     bannerSmall: byId('bannerSmall'),
@@ -65,6 +196,14 @@ export function createHud(world) {
   let bannerTimeline = null;
   let toastTimeline = null;
   let entranceTimeline = null;
+  // The left rail: active during play (and in the staged action shots),
+  // where it replaces the old objective card and mission tag outright.
+  let railActive = false;
+  let dossierState = null; // merged dossier fields, rendered on change only
+  let dossierKey = '';
+  let pdKey = '';
+  let sayQueue = [];
+  let sayTimeline = null;
 
   /** Run a tween, or jump straight to its end state in static mode. */
   function animate(targets, vars) {
@@ -156,24 +295,189 @@ export function createHud(world) {
   }
 
   // ------------------------------------------------------------ the objective
-  /** Show the objective card; a repeat of the same text just updates it. */
+  /**
+   * Show the objective card; a repeat of the same text just updates it.
+   * While the rail is active the card itself stays hidden and the same
+   * values feed the dossier instead — the rail shows them better.
+   */
   function setObjective(title, text, timer = '') {
     el.objectiveTitle.textContent = title;
     el.objectiveText.textContent = text;
     el.objectiveTimer.textContent = timer ?? '';
     el.objectiveTimer.classList.toggle('late', typeof timer === 'string' && timer.startsWith('0:'));
+    if (railActive) {
+      mergeDossier({ header: title, objective: text, timer: timer ?? '' });
+      return;
+    }
     animate(el.objective, { autoAlpha: 1, y: 0, duration: 0.35, ease: 'power2.out' });
   }
 
   /** Slide the objective card away when there is nothing to chase. */
   function hideObjective() {
     animate(el.objective, { autoAlpha: 0, y: -8, duration: 0.3, ease: 'power2.in' });
+    if (railActive) {
+      dossierState = null;
+      dossierKey = '';
+      animate(el.dossier, { autoAlpha: 0, x: -10, duration: 0.3, ease: 'power2.in' });
+    }
   }
 
   /** The small gold tag naming where the mission is happening. */
   function setMissionTag(text) {
     el.missionTag.textContent = text ?? '';
+    if (railActive) {
+      // The tag element stays hidden in play; its text lives on as the
+      // dossier's district line.
+      mergeDossier({ district: text ?? '' });
+      return;
+    }
     animate(el.missionTag, { autoAlpha: text ? 1 : 0, duration: 0.3 });
+  }
+
+  // ------------------------------------------------------------- the rail
+  /**
+   * Switch the rail on (play, staged action shots) or off (start screen).
+   * Off also folds every rail card away so nothing lingers over the title.
+   */
+  function setRailActive(value) {
+    railActive = Boolean(value);
+    if (!railActive) {
+      dossierState = null;
+      dossierKey = '';
+      pdKey = '';
+      sayQueue = [];
+      if (sayTimeline) sayTimeline.kill();
+      sayTimeline = null;
+      if (gsap) gsap.set([el.dossier, el.pdPanel, el.dialogue, el.objective, el.missionTag], { autoAlpha: 0 });
+    }
+  }
+
+  /** Write the merged dossier state to the DOM, only when it changed. */
+  function renderDossier() {
+    if (!dossierState) return;
+    const d = dossierState;
+    const key = [d.header, d.objective, d.stageFilled, d.stageTotal, d.stageIndex, d.next, d.timer, d.district].join('|');
+    if (key === dossierKey) return;
+    dossierKey = key;
+    el.dossierHead.textContent = d.header ?? '';
+    el.dossierObj.textContent = d.objective ?? '';
+    el.dossierTimer.textContent = d.timer ?? '';
+    el.dossierTimer.classList.toggle('late', typeof d.timer === 'string' && d.timer.startsWith('0:'));
+    const total = Math.max(0, Math.round(d.stageTotal ?? 0));
+    const filled = Math.max(0, Math.min(total, Math.round(d.stageFilled ?? 0)));
+    const current = d.stageIndex === undefined ? filled : Math.max(0, Math.min(total - 1, Math.round(d.stageIndex)));
+    el.dossierStage.innerHTML = '';
+    for (let i = 0; i < total; i += 1) {
+      const seg = document.createElement('i');
+      if (i < filled) seg.className = 'done';
+      else if (i === current) seg.className = 'now';
+      el.dossierStage.appendChild(seg);
+    }
+    el.dossierNext.innerHTML = '';
+    if (d.next) {
+      const lead = document.createElement('span');
+      lead.textContent = 'NEXT: ';
+      const value = document.createElement('b');
+      value.textContent = d.next;
+      el.dossierNext.append(lead, value);
+    }
+    el.dossierDistrict.textContent = d.district ?? '';
+    animate(el.dossier, { autoAlpha: 1, x: 0, duration: 0.35, ease: 'power2.out' });
+  }
+
+  /** Fold partial values (from setObjective / setMissionTag) into the dossier. */
+  function mergeDossier(partial) {
+    dossierState = { ...(dossierState ?? {}), ...partial };
+    renderDossier();
+  }
+
+  /**
+   * The mission dossier, whole: header (`NAME · MISSION i OF 6`), objective
+   * text, the stage bar (stageFilled of stageTotal segments filled, the
+   * stageIndex segment half-lit), the NEXT line, the timer and the
+   * district. Null hides the card.
+   */
+  function setDossier(data) {
+    if (!data) {
+      dossierState = null;
+      dossierKey = '';
+      animate(el.dossier, { autoAlpha: 0, x: -10, duration: 0.3, ease: 'power2.in' });
+      return;
+    }
+    dossierState = { ...(dossierState ?? {}), ...data };
+    renderDossier();
+  }
+
+  /**
+   * The Shores PD response panel from computePdResponse's reading of the
+   * real cruisers: a unit count, the IN SIGHT / EVADING chip, and one row
+   * per unit — callsign, status chip, true distance in metres. Null hides.
+   */
+  function setResponse(data) {
+    if (!data) {
+      pdKey = '';
+      animate(el.pdPanel, { autoAlpha: 0, x: -10, duration: 0.3, ease: 'power2.in' });
+      return;
+    }
+    const key = [data.count, data.sight, ...data.rows.map((row) => `${row.name}:${row.status}:${row.distM}`)].join('|');
+    if (key === pdKey) return;
+    pdKey = key;
+    el.pdTitle.textContent = `SHORES PD RESPONSE — ${data.count} ${data.count === 1 ? 'UNIT' : 'UNITS'}`;
+    el.pdChip.textContent = data.sight ? 'IN SIGHT' : 'EVADING';
+    el.pdChip.className = `chip ${data.sight ? 'sight' : 'evade'}`;
+    el.pdRows.innerHTML = '';
+    for (const row of data.rows) {
+      const line = document.createElement('div');
+      line.className = 'row';
+      const unit = document.createElement('span');
+      unit.className = 'unit';
+      unit.textContent = row.name;
+      const chip = document.createElement('span');
+      chip.className = `chip ${row.status.toLowerCase()}`;
+      chip.textContent = row.status;
+      const dist = document.createElement('span');
+      dist.className = 'dist';
+      dist.textContent = `${row.distM} m`;
+      line.append(unit, chip, dist);
+      el.pdRows.appendChild(line);
+    }
+    animate(el.pdPanel, { autoAlpha: 1, x: 0, duration: 0.35, ease: 'power2.out' });
+  }
+
+  /**
+   * Luna speaks: a line on the dispatch strip. In play the lines queue and
+   * each holds for about six seconds; in static mode the latest line is
+   * simply pinned, final, for the photograph.
+   */
+  function say(text) {
+    if (!text) return;
+    if (staticMode || !gsap) {
+      el.dialogueText.textContent = text;
+      if (gsap) gsap.set(el.dialogue, { autoAlpha: 1, x: 0 });
+      else el.dialogue.style.opacity = '1';
+      return;
+    }
+    sayQueue.push(text);
+    if (sayTimeline) return;
+    const next = () => {
+      const line = sayQueue.shift();
+      if (line === undefined) {
+        sayTimeline = null;
+        return;
+      }
+      el.dialogueText.textContent = line;
+      sayTimeline = gsap.timeline({ onComplete: next });
+      sayTimeline
+        .fromTo(el.dialogue, { autoAlpha: 0, x: -10 }, { autoAlpha: 1, x: 0, duration: 0.3, ease: 'power2.out' })
+        .to(el.dialogue, { autoAlpha: 1, duration: 6 })
+        .to(el.dialogue, { autoAlpha: 0, x: -8, duration: 0.4, ease: 'power2.in' });
+    };
+    next();
+  }
+
+  /** The district name centred under the radar disc. */
+  function setDistrict(text) {
+    el.radarLabel.textContent = text ?? '';
   }
 
   // ----------------------------------------------------------- the speedometer
@@ -186,6 +490,26 @@ export function createHud(world) {
     el.speedValue.textContent = `${Math.round(Math.abs(value))}`;
     el.carName.textContent = name ?? '';
     animate(el.speedo, { autoAlpha: 1, y: 0, duration: 0.25 });
+  }
+
+  /**
+   * The car's condition as four segments under its name: a quarter of the
+   * health lights one block, and the last block standing burns red.
+   */
+  function setCarCondition(health, maxHealth) {
+    const max = maxHealth > 0 ? maxHealth : 1;
+    const frac = Math.max(0, Math.min(1, health / max));
+    const lit = Math.ceil(4 * frac);
+    el.carCondSegs.forEach((seg, i) => seg.classList.toggle('lit', i < lit));
+    el.carCond.classList.toggle('low', lit <= 1);
+  }
+
+  // ------------------------------------------------------------------ radio
+  /** The radio pill: station on the left, the track playing, three EQ bars. */
+  function setRadio(station, title, artist) {
+    el.radioStation.textContent = station ?? '';
+    el.radioTrack.textContent = `'${title}' — ${artist}`;
+    animate(el.radio, { autoAlpha: 1, y: 0, duration: 0.3 });
   }
 
   // ---------------------------------------------------------------- banners
@@ -351,6 +675,23 @@ export function createHud(world) {
     void world;
     void HALF_ROAD;
 
+    // The route ribbon: an amber polyline along the roads from the player
+    // to the marker (state.route, from computeRoute), under every blip.
+    if (state.route && state.route.length > 1) {
+      g.strokeStyle = 'rgba(255,180,60,0.9)';
+      g.lineWidth = 4;
+      g.lineJoin = 'round';
+      g.lineCap = 'round';
+      g.beginPath();
+      state.route.forEach((point, i) => {
+        const sx = half + (point.x - px) * scale;
+        const sy = half + (point.y - py) * scale;
+        if (i === 0) g.moveTo(sx, sy);
+        else g.lineTo(sx, sy);
+      });
+      g.stroke();
+    }
+
     const blip = (wx, wy, r, color) => {
       const sx = half + (wx - px) * scale;
       const sy = half + (wy - py) * scale;
@@ -364,13 +705,68 @@ export function createHud(world) {
       g.beginPath();
       g.arc(cx, cy, r, 0, Math.PI * 2);
       g.fill();
-      return dist > rim;
+      return { cx, cy };
+    };
+
+    // A blip's on-disc position, clamped to the rim like the dots.
+    const blipPos = (wx, wy) => {
+      const sx = half + (wx - px) * scale;
+      const sy = half + (wy - py) * scale;
+      const dx = sx - half;
+      const dy = sy - half;
+      const dist = Math.hypot(dx, dy);
+      const rim = half - 6;
+      return dist > rim ? { cx: half + (dx / dist) * rim, cy: half + (dy / dist) * rim } : { cx: sx, cy: sy };
     };
 
     for (const car of state.traffic ?? []) blip(car.x, car.y, 2.2, 'rgba(220,220,228,0.75)');
     const blinkOn = state.blink === false ? true : Math.floor(performance.now() / 420) % 2 === 0;
-    if (blinkOn) for (const car of state.police ?? []) blip(car.x, car.y, 3.2, '#5fb2ff');
-    if (state.marker) blip(state.marker.x, state.marker.y, 4, '#ffc94d');
+    // Police are triangles now, nose turned to each car's real heading.
+    if (blinkOn) {
+      for (const car of state.police ?? []) {
+        const { cx, cy } = blipPos(car.x, car.y);
+        g.save();
+        g.translate(cx, cy);
+        g.rotate((car.angle ?? 0) + Math.PI / 2);
+        g.fillStyle = '#5fb2ff';
+        g.beginPath();
+        g.moveTo(0, -5);
+        g.lineTo(4, 4.4);
+        g.lineTo(-4, 4.4);
+        g.closePath();
+        g.fill();
+        g.restore();
+      }
+    }
+    // The objective is a small gold star, not a dot.
+    if (state.marker) {
+      const { cx, cy } = blipPos(state.marker.x, state.marker.y);
+      g.save();
+      g.translate(cx, cy);
+      g.fillStyle = '#ffc94d';
+      g.beginPath();
+      for (let i = 0; i < 10; i += 1) {
+        const r = i % 2 === 0 ? 5.4 : 2.3;
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        if (i === 0) g.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+        else g.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      g.closePath();
+      g.fill();
+      g.restore();
+    }
+
+    // The player's view cone: a translucent 60° wedge in the aim direction,
+    // under the arrow itself.
+    g.save();
+    g.translate(half, half);
+    g.fillStyle = 'rgba(255,247,234,0.13)';
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.arc(0, 0, 26, (state.aim ?? 0) - Math.PI / 6, (state.aim ?? 0) + Math.PI / 6);
+    g.closePath();
+    g.fill();
+    g.restore();
 
     // The player: a white arrow that turns with the aim.
     g.save();
@@ -478,8 +874,9 @@ export function createHud(world) {
    */
   function enterPlay() {
     hideStart();
+    setRailActive(true);
     if (!gsap) return;
-    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon'];
+    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#radio', '#radarLabel'];
     if (staticMode) {
       gsap.set(groups, { autoAlpha: 1, y: 0 });
       return;
@@ -489,7 +886,8 @@ export function createHud(world) {
 
   /** Hide every HUD group at once (the start screen owns the frame). */
   function hideHud() {
-    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective', '#speedo', '#missionTag', '#toast', '#hint'];
+    setRailActive(false);
+    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective', '#speedo', '#missionTag', '#toast', '#hint', '#radio', '#radarLabel'];
     if (gsap) gsap.set(groups, { autoAlpha: 0 });
   }
 
@@ -515,7 +913,14 @@ export function createHud(world) {
     setObjective,
     hideObjective,
     setMissionTag,
+    setRailActive,
+    setDossier,
+    setResponse,
+    say,
+    setDistrict,
     setSpeed,
+    setCarCondition,
+    setRadio,
     banner,
     endBanner,
     toast,

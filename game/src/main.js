@@ -9,7 +9,7 @@
 // the simulation is the same on a 60 Hz laptop and a 144 Hz monitor. The
 // camera is the one thing that does not step: GSAP quickTo eases it after
 // the player every frame, which is what makes the chase feel smooth.
-import { CAMERA, CRIME, PLAYER, SAVE_KEY, STARS, STEP } from './config.js';
+import { CAMERA, CAR, CRIME, PLAYER, SAVE_KEY, STARS, STEP } from './config.js';
 import { createRandom } from './random.js';
 import { createWorld } from './world.js';
 import { createTraffic } from './traffic.js';
@@ -21,7 +21,7 @@ import { createMissions } from './missions.js';
 import { createCollectibles } from './collectibles.js';
 import { createAudio } from './audio.js';
 import { createRenderer } from './render.js';
-import { createHud } from './hud.js';
+import { computePdResponse, computeRoute, createHud } from './hud.js';
 import { createInput } from './input.js';
 import { SHOT_TIME, stageShot } from './shots.js';
 
@@ -62,6 +62,40 @@ let nextMissionTimer = -1; // >0 while the next mission waits to open
 let hiddenTime = 0; // seconds spent out of police sight, for heat decay
 let toastQueue = []; // mission intro lines waiting their turn
 let dialogueTimer = 0; // seconds until the next queued line may show
+
+// The radio never changes station, only songs: one track every ~8 s of play.
+const RADIO_STATION = 'WAVE 92.4 · NEON TIDE';
+const RADIO_TRACKS = [
+  ['Coral Static', 'Velvet Gulls'],
+  ['Salt on the Wind', 'The Breakwaters'],
+  ['Ultraviolet Hour', 'Marina Lights'],
+];
+let radioIndex = 0;
+let radioTimer = 0;
+
+// Luna's voice on the dispatch strip: short, calm, dry. Mission intros go
+// through her too (announce below); these lines cover the live events —
+// heat rising, the target coming close, a job closing out.
+const LUNA_HEAT = [
+  'Another star. Dispatch is reading your description out loud — keep moving.',
+  'Heat just went up. Every unit in the district has your plate now.',
+  'They are calling in more cars. Break their line of sight, then breathe.',
+];
+const LUNA_NEAR = [
+  'You are close — a hundred and fifty metres, give or take. Eyes up.',
+  'Nearly there. Do not get creative this close to the drop.',
+];
+const LUNA_DONE = [
+  'Received and logged. Payment is moving. Nice driving.',
+  'That is a wrap. Luna out — until the next one.',
+];
+let lunaHeatIndex = 0;
+let lunaNearIndex = 0;
+let lunaDoneIndex = 0;
+let pdTimer = 0; // the PD panel recomputes at ~5 Hz, not every frame
+let lastHudWanted = 0;
+let nearStepKey = '';
+let nearSaid = false;
 
 /** Every car standing in the world, whatever system spawned it. */
 function allCars() {
@@ -122,9 +156,12 @@ function resetSave() {
 }
 
 // ------------------------------------------------------------- mission flow
-/** Queue a line of dialogue; the frame loop shows them one at a time. */
+/**
+ * Queue a line of dialogue. Story lines are Luna's, so they go to her
+ * dispatch strip (hud.say queues them) instead of the system toast.
+ */
 function announce(lines) {
-  for (const line of lines) toastQueue.push(line);
+  for (const line of lines) hud.say(line.replace(/^Luna:\s*/, ''));
 }
 
 /** Open the mission the chain points at, with its banner and intro lines. */
@@ -146,6 +183,8 @@ function completeMission(finished) {
     audio.cash();
     audio.missionJingle();
     hud.banner('Mission Passed', `${finished.title} · +$${finished.reward}`, '');
+    hud.say(LUNA_DONE[lunaDoneIndex % LUNA_DONE.length]);
+    lunaDoneIndex += 1;
   }
   writeSave();
   if (missions.finished) {
@@ -334,6 +373,9 @@ function beginPlay(fromSave) {
   actors.length = 0;
   screen = 'playing';
   hud.enterPlay();
+  radioIndex = 0;
+  radioTimer = 0;
+  hud.setRadio(RADIO_STATION, RADIO_TRACKS[0][0], RADIO_TRACKS[0][1]);
   hud.setWanted(0);
   snapCamera();
   beginMission();
@@ -405,6 +447,22 @@ function formatClock(seconds) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
+/** Where the live step happens, named: its place, or the place its kind implies. */
+function missionDistrict(entry) {
+  if (!entry) return '';
+  if (entry.place) {
+    try {
+      return world.place(entry.place).name;
+    } catch {
+      return '';
+    }
+  }
+  if (entry.kind === 'steal' || entry.kind === 'escort') return 'Anchor Diner';
+  if (entry.kind === 'ram') return 'Bayline Garage';
+  if (entry.kind === 'evade') return 'Citywide';
+  return '';
+}
+
 /** Push every live value into the HUD once per frame. */
 function updateHud() {
   const p = player.state;
@@ -413,18 +471,65 @@ function updateHud() {
   hud.setHealth(p.health, PLAYER.health);
   hud.setAmmo(p.ammo, p.reserve, PLAYER.magazine);
   hud.setSpeed(p.car ? Math.abs(p.car.speed) * 0.62 : 0, carName(p.car), Boolean(p.car));
+  // Cars carry no maxHealth field; their spawn health (CAR.health) is the max.
+  if (p.car) hud.setCarCondition(p.car.health, p.car.maxHealth ?? CAR.health);
   if (missions.active) {
     const current = missions.active;
     const stepInfo = missions.step();
     const label = stepInfo ? stepInfo.entry.label : current.title;
     const extra = missions.status();
+    const objectiveText = extra ? `${label} — ${extra}` : label;
+    const timer = formatClock(missions.remainingTime());
     hud.setObjective(
       `${current.title} · Mission ${missions.index + 1} of ${missions.script.length}`,
-      extra ? `${label} — ${extra}` : label,
-      formatClock(missions.remainingTime()),
+      objectiveText,
+      timer,
     );
+    // The dossier on the rail: the same data, plus the stage bar (the
+    // mission's own steps — earlier steps filled, the live one half-lit)
+    // and the real successor: the next step's label, or the next mission.
+    const position = stepInfo ? stepInfo.position : 0;
+    const nextStep = current.steps[position + 1];
+    const nextMission = missions.script[missions.index + 1];
+    const district = missionDistrict(stepInfo ? stepInfo.entry : null);
+    hud.setDossier({
+      header: `${current.title} · Mission ${missions.index + 1} of ${missions.script.length}`,
+      objective: objectiveText,
+      stageFilled: position,
+      stageTotal: current.steps.length,
+      stageIndex: position,
+      next: nextStep ? nextStep.label : nextMission ? nextMission.title : 'The city is yours',
+      timer,
+      district,
+    });
+    hud.setDistrict(district);
+    // Luna, on the radio: the target just came within 150 m on this step.
+    const stepKey = `${missions.index}:${position}:${label}`;
+    if (stepKey !== nearStepKey) {
+      nearStepKey = stepKey;
+      nearSaid = false;
+    }
+    const target = missions.target();
+    if (target && !nearSaid && Math.hypot(target.x - p.x, target.y - p.y) <= 1500) {
+      nearSaid = true;
+      hud.say(LUNA_NEAR[lunaNearIndex % LUNA_NEAR.length]);
+      lunaNearIndex += 1;
+    }
   } else if (!missions.finished) {
     hud.hideObjective();
+  }
+  // Luna again: a fresh star is worth a word from dispatch.
+  if (police.wanted > lastHudWanted) {
+    hud.say(LUNA_HEAT[lunaHeatIndex % LUNA_HEAT.length]);
+    lunaHeatIndex += 1;
+  }
+  lastHudWanted = police.wanted;
+  // The PD panel, refreshed at ~5 Hz from the same cruiser list the radar
+  // blips — computePdResponse (hud.js) derives names, statuses, distances
+  // and the sight chip from those real cars, and says when to hide.
+  if (pdTimer >= 0.2) {
+    pdTimer = 0;
+    hud.setResponse(computePdResponse(police.cars, { x: p.x, y: p.y, heading: p.car ? p.car.angle : p.aim }, police.wanted));
   }
   // The context hint: what E would do right now.
   if (screen === 'playing') {
@@ -636,6 +741,7 @@ function render() {
       aim: p.car ? p.car.angle : p.aim,
       rotate: 0,
       marker,
+      route: marker ? computeRoute(p, marker) : null,
       traffic: traffic.all(),
       police: police.cars,
     });
@@ -670,6 +776,13 @@ function frame(stamp) {
         break;
       }
     }
+    // The next song rolls around every ~8 s; the station never changes.
+    radioTimer += dt;
+    if (radioTimer >= 8) {
+      radioTimer = 0;
+      radioIndex = (radioIndex + 1) % RADIO_TRACKS.length;
+      hud.setRadio(RADIO_STATION, RADIO_TRACKS[radioIndex][0], RADIO_TRACKS[radioIndex][1]);
+    }
     followCamera(dt);
   } else if (screen === 'busted' || screen === 'wasted') {
     time += dt;
@@ -683,7 +796,10 @@ function frame(stamp) {
   }
 
   render();
-  if (screen === 'playing' || screen === 'paused') updateHud();
+  if (screen === 'playing' || screen === 'paused') {
+    pdTimer += dt;
+    updateHud();
+  }
 }
 
 // --------------------------------------------------------------- shot mode
@@ -719,7 +835,9 @@ function runShot(name) {
   time = SHOT_TIME;
   render();
   if (result.radar) {
-    hud.drawRadar({ ...result.radar, marker: result.marker, traffic: traffic.all(), police: police.cars, blink: true });
+    // The shot's own radar state wins where it provides one (route, the
+    // staged cruisers as police, traffic with those cruisers filtered out).
+    hud.drawRadar({ marker: result.marker, traffic: traffic.all(), police: police.cars, blink: true, ...result.radar });
   }
   hud.freeze();
   render();

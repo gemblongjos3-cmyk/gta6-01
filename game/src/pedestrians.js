@@ -9,8 +9,26 @@ const SKIN = ['#8a5a3c', '#c08a63', '#e0b48c', '#6b4230', '#f0cfae'];
 export function createPedestrians(world, random) {
   const people = [];
 
+  // Where the evening gathers: outside the diner, in front of the market,
+  // and along the docks boardwalk. Spawns and pauses lean toward these
+  // spots so the crowds cluster like real ones instead of scattering
+  // evenly over the whole map. Totals and reactions are unchanged.
+  const hotspots = [];
+  const diner = world.place('diner');
+  hotspots.push({ x: diner.door.x, y: diner.door.y });
+  const mart = (world.buildings ?? []).find((building) => building.name === 'Mango Mart');
+  if (mart) hotspots.push({ x: mart.x + mart.w / 2, y: mart.y + mart.h + 14 });
+  const warehouse = world.place('warehouse');
+  hotspots.push({ x: warehouse.door.x - 60, y: COAST.beachTop - 16 });
+
   function spawnOne() {
-    const point = world.clearPavementPoint();
+    let point;
+    if (random.chance(0.45)) {
+      const spot = random.pick(hotspots);
+      point = { x: spot.x + random.range(-90, 90), y: spot.y + random.range(-36, 36) };
+    } else {
+      point = world.clearPavementPoint();
+    }
     const angle = random() * Math.PI * 2;
     const person = {
       x: point.x,
@@ -92,7 +110,10 @@ export function createPedestrians(world, random) {
         person.speed = PEDESTRIAN.walkSpeed * (person.panic > -8 ? 0.75 : 1);
         if (person.timer <= 0) {
           person.timer = random.range(1.5, 4);
-          if (random.chance(0.3)) {
+          // Near a hotspot people stop and linger — that is what makes a
+          // cluster a cluster instead of a passing coincidence.
+          const nearHotspot = hotspots.some((spot) => Math.hypot(spot.x - person.x, spot.y - person.y) < 260);
+          if (random.chance(nearHotspot ? 0.55 : 0.3)) {
             person.state = 'pause';
             person.speed = 0;
           } else {

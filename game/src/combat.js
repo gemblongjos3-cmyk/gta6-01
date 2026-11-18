@@ -11,6 +11,7 @@ export function createCombat(world) {
   const flashes = [];
   const sparks = [];
   const casings = [];
+  const hitmarks = [];
   let shake = 0;
 
   function addBullet(x, y, angle, hostile, damage) {
@@ -80,6 +81,7 @@ export function createCombat(world) {
         if (bullet.hostile) {
           if (ctx.player && Math.hypot(ctx.player.x - bullet.x, ctx.player.y - bullet.y) < PLAYER.radius + 4) {
             ctx.onPlayerHit(bullet.damage);
+            hitmarks.push({ x: bullet.x, y: bullet.y, life: 0.14 });
             spark(bullet.x, bullet.y, Math.atan2(bullet.vy, bullet.vx), '#ff7a6a');
             dead = true;
             break;
@@ -88,6 +90,7 @@ export function createCombat(world) {
           const hit = findVictim(bullet, ctx);
           if (hit) {
             ctx.onHit(hit.kind, hit.entity, bullet);
+            if (hit.kind === 'actor') hitmarks.push({ x: bullet.x, y: bullet.y, life: 0.14 });
             spark(bullet.x, bullet.y, Math.atan2(bullet.vy, bullet.vx), hit.kind === 'car' ? '#ffb46a' : '#d8564a');
             dead = true;
             break;
@@ -99,6 +102,10 @@ export function createCombat(world) {
     for (let index = flashes.length - 1; index >= 0; index -= 1) {
       flashes[index].life -= dt;
       if (flashes[index].life <= 0) flashes.splice(index, 1);
+    }
+    for (let index = hitmarks.length - 1; index >= 0; index -= 1) {
+      hitmarks[index].life -= dt;
+      if (hitmarks[index].life <= 0) hitmarks.splice(index, 1);
     }
     for (let index = sparks.length - 1; index >= 0; index -= 1) {
       const s = sparks[index];
@@ -142,6 +149,7 @@ export function createCombat(world) {
     flashes.length = 0;
     sparks.length = 0;
     casings.length = 0;
+    hitmarks.length = 0;
     shake = 0;
   }
 
@@ -150,6 +158,7 @@ export function createCombat(world) {
     flashes,
     sparks,
     casings,
+    hitmarks,
     update,
     shoot,
     spark,

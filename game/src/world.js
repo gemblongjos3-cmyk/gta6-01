@@ -222,6 +222,23 @@ export function createWorld(random) {
   }
   for (let x = 80; x < WORLD.width; x += 240) props.push({ kind: 'lamp', x, y: COAST.beachTop - 30, side: 1 });
 
+  // Beach life on the sand near the boardwalk: umbrellas with towels laid
+  // out under them, so the shore reads as a place people actually sit.
+  const BEACH_SETS = ['#e2574c', '#4fa3c7', '#f0c479', '#7bbf6a', '#e08aaf'];
+  for (let x = 220; x < WORLD.width - 140; x += 370) {
+    const ux = x + random() * 60;
+    const uy = COAST.beachTop + 92 + random() * 84;
+    const color = BEACH_SETS[Math.floor(random() * BEACH_SETS.length)];
+    props.push({ kind: 'umbrella', x: ux, y: uy, color });
+    props.push({ kind: 'towel', x: ux + 24 + random() * 22, y: uy + 16 + random() * 14, color, angle: random() * Math.PI });
+    props.push({ kind: 'towel', x: ux - 30 - random() * 18, y: uy + 10 + random() * 18, color: BEACH_SETS[Math.floor(random() * BEACH_SETS.length)], angle: random() * Math.PI });
+  }
+
+  // One small kiosk on the sand by the docks boardwalk, hand-painted sign
+  // and all — the evening coconut stall the dock crews queue at.
+  const warehousePlace = places.get('warehouse');
+  if (warehousePlace) props.push({ kind: 'kiosk', x: warehousePlace.door.x + 176, y: COAST.beachTop + 46 });
+
   solids.push({ x: 0, y: COAST.waterline, w: WORLD.width, h: WORLD.height - COAST.waterline, kind: 'sea' });
 
   const grid = {

@@ -55,6 +55,61 @@
     text-transform: uppercase; color: var(--gold); opacity: 0;
   }
 
+  /* The left rail: mission dossier, Shores PD response and Luna's dispatch
+     strip stacked under the wanted stars. It replaces the top-centre
+     objective card during play; the card and tag stay in the DOM, hidden. */
+  #rail {
+    position: absolute; left: 22px; top: 56px; width: 300px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .railCard {
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 12px;
+    padding: 10px 14px 11px; backdrop-filter: blur(3px); opacity: 0;
+  }
+  #dossier .head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  #dossier .head .name { font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--gold); font-weight: 700; }
+  #dossier .head .timer { font-size: 19px; font-weight: 800; color: #ffd27a; font-variant-numeric: tabular-nums; }
+  #dossier .head .timer.late { color: var(--danger); }
+  #dossier .obj { font-size: 14.5px; font-weight: 600; margin-top: 3px; line-height: 1.35; }
+  #dossier .stage { display: flex; gap: 4px; margin-top: 9px; }
+  #dossier .stage i { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 244, 228, 0.16); }
+  #dossier .stage i.done { background: linear-gradient(90deg, #ffc94d, #ff9d5c); }
+  #dossier .stage i.now { background: linear-gradient(90deg, #ffc94d 50%, rgba(255, 244, 228, 0.16) 50%); }
+  #dossier .next { font-size: 11.5px; color: var(--muted); margin-top: 8px; letter-spacing: 0.4px; }
+  #dossier .next b { color: var(--ink); font-weight: 600; }
+  #dossier .district { font-size: 10.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); margin-top: 5px; }
+
+  #pdPanel .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #pdPanel .head .name { font-size: 11px; letter-spacing: 2px; color: #8ec9ff; font-weight: 700; }
+  .chip {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 1.5px; padding: 2px 8px; border-radius: 999px;
+    white-space: nowrap;
+  }
+  .chip.sight { background: rgba(255, 91, 91, 0.18); color: #ff9a8a; border: 1px solid rgba(255, 91, 91, 0.55); }
+  .chip.evade { background: rgba(63, 224, 208, 0.12); color: #7fe8dc; border: 1px solid rgba(63, 224, 208, 0.45); }
+  #pdRows .row { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 12.5px; }
+  #pdRows .unit { font-weight: 700; letter-spacing: 1px; flex: 1; }
+  #pdRows .dist { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #pdRows .chip.pursuit { background: rgba(255, 91, 91, 0.18); color: #ff9a8a; border: 1px solid rgba(255, 91, 91, 0.5); }
+  #pdRows .chip.intercept { background: rgba(255, 170, 60, 0.16); color: #ffc46a; border: 1px solid rgba(255, 170, 60, 0.5); }
+  #pdRows .chip.roadblock { background: rgba(176, 132, 255, 0.16); color: #cdaaff; border: 1px solid rgba(176, 132, 255, 0.5); }
+  #pdRows .chip.closing { background: rgba(255, 201, 77, 0.13); color: #ffd27a; border: 1px solid rgba(255, 201, 77, 0.45); }
+  #pdRows .chip.patrol { background: rgba(160, 175, 190, 0.12); color: #b9c6d2; border: 1px solid rgba(160, 175, 190, 0.4); }
+
+  #dialogue { display: flex; gap: 10px; align-items: center; }
+  #dialogue .portrait {
+    flex: 0 0 54px; width: 54px; height: 54px; border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--panel-edge); background: #1d2b33;
+  }
+  #dialogue .portrait svg { display: block; width: 54px; height: 54px; }
+  #dialogue .name { font-size: 10px; letter-spacing: 2.5px; color: var(--gold); font-weight: 700; }
+  #dialogue .text { font-size: 13px; line-height: 1.35; margin-top: 2px; }
+
+  #radarLabel {
+    position: absolute; left: 20px; bottom: 3px; width: 200px; text-align: center;
+    font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--muted);
+  }
+
   #minimapWrap {
     position: absolute; left: 20px; bottom: 20px; width: 200px; height: 200px;
     border-radius: 50%; border: 2px solid rgba(255, 214, 150, 0.55);
@@ -71,6 +126,23 @@
   #speedo .value { font-size: 46px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
   #speedo .unit { font-size: 11px; letter-spacing: 3px; color: var(--muted); }
   #speedo .car { font-size: 11px; letter-spacing: 2px; color: var(--gold); text-transform: uppercase; margin-top: 4px; }
+  #carCond { display: flex; gap: 4px; justify-content: flex-end; margin-top: 7px; }
+  #carCond .seg { display: block; width: 24px; height: 6px; border-radius: 3px; background: rgba(255, 244, 228, 0.16); }
+  #carCond .seg.lit { background: linear-gradient(90deg, #6fdc6f, #a8ef8c); }
+  #carCond.low .seg.lit { background: linear-gradient(90deg, #ff4f4f, #ff9a5a); }
+
+  #radio {
+    position: absolute; right: 26px; bottom: 168px; display: flex; align-items: center; gap: 10px;
+    padding: 7px 14px; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 999px;
+    opacity: 0; white-space: nowrap;
+  }
+  #radio .station { font-size: 10px; letter-spacing: 2px; color: var(--gold); font-weight: 700; }
+  #radio .track { font-size: 12px; letter-spacing: 0.5px; color: var(--ink); }
+  #radio .eq { display: inline-flex; align-items: flex-end; gap: 2.5px; height: 10px; }
+  #radio .eq i { display: block; width: 3px; border-radius: 1px; background: var(--gold); }
+  #radio .eq i:nth-child(1) { height: 5px; }
+  #radio .eq i:nth-child(2) { height: 10px; }
+  #radio .eq i:nth-child(3) { height: 7px; }
 
   #banner {
     position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%);
@@ -161,9 +233,43 @@
     <div class="timer" id="objectiveTimer"></div>
   </div>
   <div id="missionTag">Mission</div>
+  <div id="rail">
+    <div id="dossier" class="railCard">
+      <div class="head"><span class="name" id="dossierHead">Mission</span><span class="timer" id="dossierTimer"></span></div>
+      <div class="obj" id="dossierObj"></div>
+      <div class="stage" id="dossierStage"></div>
+      <div class="next" id="dossierNext"></div>
+      <div class="district" id="dossierDistrict"></div>
+    </div>
+    <div id="pdPanel" class="railCard">
+      <div class="head"><span class="name" id="pdTitle">Shores PD Response</span><span class="chip evade" id="pdChip">Evading</span></div>
+      <div id="pdRows"></div>
+    </div>
+    <div id="dialogue" class="railCard">
+      <div class="portrait" aria-hidden="true">
+        <svg viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
+          <rect x="0" y="0" width="54" height="54" fill="#1d2b33"/>
+          <path d="M10 54 L12 40 Q13 30 20 27 L34 27 Q41 30 42 40 L44 54 Z" fill="#241426"/>
+          <ellipse cx="27" cy="25" rx="10" ry="12" fill="#b98a68"/>
+          <path d="M16 24 Q15 10 27 9 Q39 10 38 24 Q38 16 33 13 Q27 17 21 13 Q16 16 16 24 Z" fill="#2a1a2e"/>
+          <path d="M38 24 Q39 12 30 10" fill="none" stroke="#ffb35c" stroke-width="2" stroke-linecap="round"/>
+          <path d="M15 20 Q16 8 27 7 Q38 8 39 20" fill="none" stroke="#101018" stroke-width="3" stroke-linecap="round"/>
+          <rect x="36" y="19" width="5" height="9" rx="2" fill="#101018"/>
+          <path d="M38 28 Q37 35 31 36" fill="none" stroke="#101018" stroke-width="2.4" stroke-linecap="round"/>
+          <circle cx="30.5" cy="36.5" r="1.6" fill="#101018"/>
+        </svg>
+      </div>
+      <div>
+        <div class="name">Luna — Dispatch</div>
+        <div class="text" id="dialogueText"></div>
+      </div>
+    </div>
+  </div>
   <div id="minimapWrap"><canvas id="minimap" width="200" height="200"></canvas><div class="ring"></div></div>
+  <div id="radarLabel"></div>
   <div id="weapon">Pistol · <b id="ammoCount">12 / 72</b></div>
-  <div id="speedo"><div class="value" id="speedValue">0</div><div class="unit">km/h</div><div class="car" id="carName">Sedan</div></div>
+  <div id="radio"><span class="station" id="radioStation">WAVE 92.4 · NEON TIDE</span><span class="track" id="radioTrack">'Coral Static' — Velvet Gulls</span><span class="eq" aria-hidden="true"><i></i><i></i><i></i></span></div>
+  <div id="speedo"><div class="value" id="speedValue">0</div><div class="unit">km/h</div><div class="car" id="carName">Sedan</div><div id="carCond"><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div></div>
   <div id="banner"><div class="big" id="bannerBig">Busted</div><div class="small" id="bannerSmall">The Shores PD found you</div></div>
   <div id="toast"></div>
   <div id="hint"></div>

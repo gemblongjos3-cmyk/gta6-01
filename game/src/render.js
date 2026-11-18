@@ -34,6 +34,13 @@ export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
   const view = { w: 1280, h: 800, dpr: 1 };
   let cam = { x: WORLD.width / 2, y: WORLD.height / 2, zoom: 1 };
+  // Siren spill is rationed to the four cruisers nearest the camera centre.
+  // The set is settled at the end of one frame and spent on the next —
+  // cruisers barely move between frames, and a staged shot is painted
+  // twice, so the photograph still gets the exact four.
+  let sirenSeen = [];
+  let sirenNearest = null;
+  let sirenDrawn = 0;
 
   /** Fit the canvas to its window; the shot rig asks for exactly 1280x800. */
   function resize() {
@@ -70,6 +77,8 @@ export function createRenderer(canvas) {
   /** Open a frame: dusk sky behind everything, then the camera goes on. */
   function beginFrame(camera) {
     cam = camera;
+    sirenSeen = [];
+    sirenDrawn = 0;
     ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     const sky = ctx.createLinearGradient(0, 0, 0, view.h);
     sky.addColorStop(0, PALETTE.skyTop);
@@ -84,6 +93,14 @@ export function createRenderer(canvas) {
 
   /** Close a frame: lift the camera, darken the corners, warm the edges. */
   function endFrame() {
+    // Settle which cruisers earn the siren spill on the next frame.
+    sirenNearest = new Set(
+      sirenSeen
+        .map((car) => ({ car, dist: Math.hypot(car.x - cam.x, car.y - cam.y) }))
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, 4)
+        .map((entry) => entry.car),
+    );
     ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     const glow = ctx.createRadialGradient(
       view.w / 2, view.h * 0.42, Math.min(view.w, view.h) * 0.36,
@@ -92,6 +109,32 @@ export function createRenderer(canvas) {
     glow.addColorStop(0, 'rgba(0,0,0,0)');
     glow.addColorStop(1, PALETTE.vignette);
     ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, view.w, view.h);
+    paintGrade();
+  }
+
+  /**
+   * The light cinematic grade, painted last in plain screen space: a warm
+   * sunset wash over the top of the frame, a cool tint settling into the
+   * lower third, and a vignette that only reaches the corners. Every alpha
+   * stays low on purpose — the pastel city must not turn muddy under it.
+   */
+  function paintGrade() {
+    const warm = ctx.createLinearGradient(0, 0, 0, view.h * 0.55);
+    warm.addColorStop(0, 'rgba(255,138,54,0.10)');
+    warm.addColorStop(1, 'rgba(255,138,54,0)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, 0, view.w, view.h * 0.55);
+    const cool = ctx.createLinearGradient(0, view.h * (2 / 3), 0, view.h);
+    cool.addColorStop(0, 'rgba(16,52,72,0)');
+    cool.addColorStop(1, 'rgba(16,52,72,0.08)');
+    ctx.fillStyle = cool;
+    ctx.fillRect(0, view.h * (2 / 3), view.w, view.h / 3);
+    const corner = Math.hypot(view.w / 2, view.h / 2);
+    const shade = ctx.createRadialGradient(view.w / 2, view.h / 2, 0, view.w / 2, view.h / 2, corner);
+    shade.addColorStop(0.58, 'rgba(12,8,24,0)');
+    shade.addColorStop(1, 'rgba(12,8,24,0.26)');
+    ctx.fillStyle = shade;
     ctx.fillRect(0, 0, view.w, view.h);
   }
 
@@ -116,6 +159,27 @@ export function createRenderer(canvas) {
       const wob = Math.sin(x * 0.05 + time * 1.3) * 6;
       ctx.fillRect(x + wob, COAST.waterline + 120 + (x % 260), 44, 3);
     }
+    // The foam line where the sea meets the sand: jagged, and a pure
+    // function of x and the (frozen, in screenshots) time, so the same
+    // moment always breaks the same way.
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (let x = 0; x <= WORLD.width; x += 16) {
+      const y = COAST.waterline - 2 + Math.sin(x * 0.045 + time * 0.9) * 3 + Math.sin(x * 0.013 + 1.7) * 2;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let x = 0; x <= WORLD.width; x += 22) {
+      const y = COAST.waterline + 13 + Math.sin(x * 0.03 - time * 0.6) * 2.4 + Math.sin(x * 0.017) * 1.6;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
     // Two piers reach into the water from the promenade.
     ctx.fillStyle = '#8a6a4e';
     for (const px of [ROAD.avenueX[3] - 26, ROAD.avenueX[5] - 26]) {
@@ -339,6 +403,9 @@ export function createRenderer(canvas) {
     if (prop.kind === 'palm') return paintPalm(prop, time);
     if (prop.kind === 'lamp') return paintLamp(prop, time);
     if (prop.kind === 'crate') return paintCrate(prop);
+    if (prop.kind === 'umbrella') return paintUmbrella(prop);
+    if (prop.kind === 'towel') return paintTowel(prop);
+    if (prop.kind === 'kiosk') return paintKiosk(prop);
     if (prop.kind === 'hydrant') {
       ctx.fillStyle = '#c94f43';
       ctx.fillRect(prop.x - 4, prop.y - 7, 8, 12);
@@ -404,6 +471,66 @@ export function createRenderer(canvas) {
     groundShadow(prop.x, prop.y + 4, s + 6, s * 0.6);
     drawBox(prop.x, prop.y, s);
     if (prop.stack === 2) drawBox(prop.x + 3, prop.y - 4, s * 0.66);
+    return undefined;
+  }
+
+  /** A beach umbrella: a tilted pole and a bright half-dome of shade. */
+  function paintUmbrella(prop) {
+    groundShadow(prop.x + 3, prop.y + 3, 17, 7);
+    ctx.strokeStyle = '#8a6a4e';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(prop.x, prop.y + 8);
+    ctx.lineTo(prop.x + 2, prop.y - 8);
+    ctx.stroke();
+    ctx.fillStyle = prop.color ?? '#e2574c';
+    ctx.beginPath();
+    ctx.arc(prop.x + 2, prop.y - 7, 15, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(prop.x + 2, prop.y - 7, 15, Math.PI * 1.45, Math.PI * 1.95);
+    ctx.lineTo(prop.x + 2, prop.y - 7);
+    ctx.closePath();
+    ctx.fill();
+    return undefined;
+  }
+
+  /** A beach towel laid flat on the sand, with one bright stripe. */
+  function paintTowel(prop) {
+    ctx.save();
+    ctx.translate(prop.x, prop.y);
+    ctx.rotate(prop.angle ?? 0);
+    ctx.fillStyle = prop.color ?? '#4fa3c7';
+    ctx.fillRect(-14, -7, 28, 14);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(-14, -2, 28, 3);
+    ctx.restore();
+    return undefined;
+  }
+
+  /** The docks coconut kiosk: a wooden hut, a counter, and its painted sign. */
+  function paintKiosk(prop) {
+    groundShadow(prop.x, prop.y + 16, 30, 9);
+    ctx.fillStyle = '#9a744e';
+    ctx.fillRect(prop.x - 23, prop.y - 8, 46, 24);
+    ctx.fillStyle = '#6f5136';
+    ctx.fillRect(prop.x - 23, prop.y + 2, 46, 3);
+    ctx.fillStyle = '#3f7d5a';
+    ctx.beginPath();
+    ctx.moveTo(prop.x - 27, prop.y - 8);
+    ctx.lineTo(prop.x, prop.y - 19);
+    ctx.lineTo(prop.x + 27, prop.y - 8);
+    ctx.closePath();
+    ctx.fill();
+    // The hand-painted board over the counter.
+    ctx.fillStyle = '#2e2a38';
+    ctx.fillRect(prop.x - 35, prop.y - 31, 70, 12);
+    ctx.fillStyle = '#ffe7b0';
+    ctx.font = `700 8.5px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Es Kelapa Sore', prop.x, prop.y - 22);
     return undefined;
   }
 
@@ -498,7 +625,10 @@ export function createRenderer(canvas) {
    */
   function drawCar(car, time) {
     if (!visible(car.x, car.y, 120)) return;
-    if (car.kind === 'police') paintSirenGlow(car, time);
+    if (car.kind === 'police') {
+      sirenSeen.push(car);
+      paintSirenGlow(car, time);
+    }
     ctx.save();
     ctx.translate(car.x, car.y);
     ctx.rotate(car.angle);
@@ -548,15 +678,59 @@ export function createRenderer(canvas) {
     if (car.smoke > 0.05) paintSmoke(car, time);
   }
 
-  /** The light a cruiser throws on the asphalt: red one breath, blue the next. */
+  // Unit-circle siren gradients, built once and reused under a transform:
+  // red and blue, each pooling at alpha 0.18 and dissolving to nothing.
+  let sirenGradRed = null;
+  let sirenGradBlue = null;
+
+  /** The cached unit gradient for one siren colour. */
+  function sirenGradient(red) {
+    if (red && sirenGradRed) return sirenGradRed;
+    if (!red && sirenGradBlue) return sirenGradBlue;
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    grad.addColorStop(0, red ? 'rgba(255,80,70,0.18)' : 'rgba(90,170,255,0.18)');
+    grad.addColorStop(1, red ? 'rgba(255,80,70,0)' : 'rgba(90,170,255,0)');
+    if (red) sirenGradRed = grad;
+    else sirenGradBlue = grad;
+    return grad;
+  }
+
+  /**
+   * The light a cruiser spills on wet asphalt: an ellipse pooled under the
+   * car, red one beat and blue the next by the siren phase, plus a thinner
+   * streak thrown further along the heading at a lower alpha. Only the
+   * four cruisers nearest the camera centre earn the spill.
+   */
   function paintSirenGlow(car, time) {
-    const phase = Math.sin(time * 11 + (car.sirenPhase ?? 0)) > 0;
-    const color = phase ? '255,80,70' : '90,170,255';
-    const glow = ctx.createRadialGradient(car.x, car.y, 6, car.x, car.y, 86);
-    glow.addColorStop(0, `rgba(${color},0.30)`);
-    glow.addColorStop(1, `rgba(${color},0)`);
-    ctx.fillStyle = glow;
-    ctx.fillRect(car.x - 86, car.y - 86, 172, 172);
+    void time;
+    if (sirenNearest) {
+      if (!sirenNearest.has(car)) return;
+    } else if (sirenDrawn >= 4) {
+      return;
+    }
+    sirenDrawn += 1;
+    const red = Math.floor(car.sirenPhase ?? 0) % 2 === 0;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(car.x, car.y);
+    ctx.rotate(car.angle);
+    ctx.fillStyle = sirenGradient(red);
+    // The pool itself: an ellipse roughly 100x52 world px in radius.
+    ctx.save();
+    ctx.scale(100, 52);
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // The streak: stretched ~2.2x along the heading, thinner and fainter.
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.scale(220, 23);
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.restore();
   }
 
   /** Police paint: white doors, a blue band and a light bar that strobes. */
@@ -687,7 +861,35 @@ export function createRenderer(canvas) {
       ctx.fillStyle = '#f0ead8';
       ctx.fillRect(actor.x - 5, actor.y - 19, 10, 3.4);
     }
+    paintActorHealth(actor);
     return undefined;
+  }
+
+  /**
+   * The target readout over a hostile actor: a small amber chevron pointing
+   * down at him over a thin health bar. Staged gunmen carry hp/maxHp, live
+   * ones health against their spawn health; either way the bar shows once
+   * he is hurt, and always while he is flagged hostile.
+   */
+  function paintActorHealth(actor) {
+    const hp = actor.hp ?? actor.health;
+    const maxHp = actor.maxHp ?? actor.maxHealth ?? (actor.isBoss ? 999 : 60);
+    if (hp == null || !(maxHp > 0)) return;
+    if (!(hp < maxHp || actor.hostile)) return;
+    const frac = Math.max(0, Math.min(1, hp / maxHp));
+    // The chevron: a small downward amber point above the bar.
+    ctx.fillStyle = '#ffb02e';
+    ctx.beginPath();
+    ctx.moveTo(actor.x - 5, actor.y - 36);
+    ctx.lineTo(actor.x + 5, actor.y - 36);
+    ctx.lineTo(actor.x, actor.y - 30);
+    ctx.closePath();
+    ctx.fill();
+    // The bar: 34 px wide, dark backing, amber fill by remaining health.
+    ctx.fillStyle = 'rgba(10,8,16,0.65)';
+    ctx.fillRect(actor.x - 17, actor.y - 28, 34, 4);
+    ctx.fillStyle = '#ffc94d';
+    ctx.fillRect(actor.x - 17, actor.y - 28, 34 * frac, 4);
   }
 
   /** The player: coral jacket on foot, a clear aim arm, a hurt ring. */
@@ -749,23 +951,58 @@ export function createRenderer(canvas) {
       ctx.fillRect(-2.4, -1, 4.8, 2);
       ctx.restore();
     }
-    // Bullets as short bright streaks along their travel.
-    ctx.strokeStyle = '#ffe9b0';
-    ctx.lineWidth = 2.4;
+    // Bullets as glowing tracers: a warm streak trailing ~0.055 s of travel
+    // behind the round, lit with a bright core dot at its head.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineWidth = 2;
     for (const b of combat.bullets) {
-      const len = 13;
-      const back = Math.atan2(b.vy, b.vx) + Math.PI;
+      const tailX = b.x - b.vx * 0.055;
+      const tailY = b.y - b.vy * 0.055;
+      const streak = ctx.createLinearGradient(tailX, tailY, b.x, b.y);
+      streak.addColorStop(0, 'rgba(255,140,60,0)');
+      streak.addColorStop(1, 'rgba(255,214,120,0.9)');
+      ctx.strokeStyle = streak;
       ctx.beginPath();
-      ctx.moveTo(b.x, b.y);
-      ctx.lineTo(b.x + Math.cos(back) * len, b.y + Math.sin(back) * len);
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.fillStyle = '#fff3c4';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    // Hitmarks: a small white X where a round landed, fading with its life.
+    ctx.lineWidth = 2;
+    for (const mark of combat.hitmarks ?? []) {
+      const alpha = Math.max(0, Math.min(1, mark.life / 0.14));
+      ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+      ctx.beginPath();
+      ctx.moveTo(mark.x - 4.5, mark.y - 4.5);
+      ctx.lineTo(mark.x + 4.5, mark.y + 4.5);
+      ctx.moveTo(mark.x + 4.5, mark.y - 4.5);
+      ctx.lineTo(mark.x - 4.5, mark.y + 4.5);
       ctx.stroke();
     }
-    // Muzzle flashes: a four-point star that lives for a blink.
+    // Muzzle flashes: a cone of light under a four-point star, for a blink.
     for (const f of combat.flashes) {
       const r = 13 * Math.max(0.2, f.life / 0.07);
       ctx.save();
       ctx.translate(f.x, f.y);
       ctx.rotate(f.angle);
+      // The cone: a warm fan thrown ~34 px along the shot direction.
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.5 * Math.max(0, Math.min(1, f.life / 0.07));
+      ctx.fillStyle = '#ffb45a';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(34, -7);
+      ctx.lineTo(34, 7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
       ctx.fillStyle = f.hostile ? 'rgba(255,120,90,0.95)' : 'rgba(255,214,120,0.95)';
       ctx.beginPath();
       ctx.moveTo(r, 0);
