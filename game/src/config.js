@@ -67,7 +67,7 @@ export const CAR = {
 };
 
 export const TRAFFIC = {
-  cars: 26,
+  cars: 40,
   speed: 160,
   speedJitter: 45,
   laneOffset: 30,
@@ -76,10 +76,18 @@ export const TRAFFIC = {
 };
 
 export const PEDESTRIAN = {
-  count: 46,
+  count: 64,
   walkSpeed: 62,
   runSpeed: 190,
   panicTime: 5,
+};
+
+/** The Sunset Stars: twelve gold palms hidden over the city, each worth cash to whoever rolls over it. */
+export const STARS = {
+  count: 12,
+  reward: 150,
+  radius: 34,
+  color: '#ffd94d',
 };
 
 export const POLICE = {

@@ -83,9 +83,9 @@ export function createWorld(random) {
 
   /** Split a block into two to four lots and put a building on each. */
   function fillBlock(block) {
-    const columns = random() < 0.35 ? 2 : 1;
-    const rows = block.height > 260 ? 2 : 1;
-    const gap = 10 + random() * 10;
+    const columns = random() < 0.6 ? 2 : 1;
+    const rows = block.height > 200 ? 2 : 1;
+    const gap = 8 + random() * 8;
     const lotWidth = (block.width - gap * (columns - 1)) / columns;
     const lotHeight = (block.height - gap * (rows - 1)) / rows;
     for (let c = 0; c < columns; c += 1) {
@@ -102,7 +102,43 @@ export function createWorld(random) {
     }
   }
 
-  for (const block of blocks) fillBlock(block);
+  /**
+   * Some blocks are not built on at all: they are parking lots, an asphalt pad with painted
+   * bays and a few locked cars standing in them. A city of nothing but slabs reads flat; a
+   * lot breaks the rhythm and gives the streets somewhere their cars actually live.
+   */
+  const lots = [];
+  function fillLot(block) {
+    const pad = { x: block.left + 6, y: block.top + 6, w: block.width - 12, h: block.height - 12 };
+    const cars = [];
+    const bayW = 34;
+    const rowsY = [pad.y + 34, pad.y + pad.h - 34];
+    for (const rowY of rowsY) {
+      for (let x = pad.x + 30; x < pad.x + pad.w - 24; x += bayW + 14) {
+        if (random() < 0.42) continue; // an empty bay: somebody is out for the evening
+        const angle = rowY === rowsY[0] ? Math.PI / 2 : -Math.PI / 2;
+        const body = { x, y: rowY, w: 30, h: 58 };
+        cars.push({
+          x,
+          y: rowY,
+          angle,
+          color: PALETTE.car[Math.floor(random() * PALETTE.car.length)],
+          model: random() < 0.3 ? 'van' : 'sedan',
+        });
+        solids.push({ ...body, kind: 'lotcar' });
+      }
+    }
+    lots.push({ pad, cars, seed: Math.floor(block.left + block.top) });
+    block.kind = 'lot';
+  }
+
+  // One block in nine stays unbuilt: a parking lot. Never a block the story names — the
+  // named places below need their buildings, and a lot under the warehouse would tangle.
+  const placeBlocks = new Set(PLACES.map((place) => `${place.block[0]},${place.block[1]}`));
+  for (const block of blocks) {
+    if (!placeBlocks.has(`${block.column},${block.row}`) && random() < 0.11) fillLot(block);
+    else fillBlock(block);
+  }
 
   // The story's named places take over a building on their block: a landmark with a sign.
   for (const place of PLACES) {
@@ -135,6 +171,20 @@ export function createWorld(random) {
     if (random() < 0.42) {
       building.name = BUSINESS_NAMES[nameIndex % BUSINESS_NAMES.length];
       nameIndex += 1;
+    }
+  }
+
+  // Crates stack up around the Pier 9 warehouse and the marina: the docks work for a living,
+  // and a gunfight there should have something to hide behind — and to be photographed against.
+  for (const key of ['warehouse', 'marina']) {
+    const place = places.get(key);
+    if (!place) continue;
+    const base = place.building;
+    for (let stack = 0; stack < 7; stack += 1) {
+      const x = base.x + 14 + stack * 44 + random() * 10;
+      const y = base.y + base.h + 16 + (stack % 2) * 30;
+      props.push({ kind: 'crate', x, y, size: 15 + random() * 7, stack: random() < 0.5 ? 2 : 1 });
+      solids.push({ x: x - 14, y: y - 14, w: 28, h: 28, kind: 'crate' });
     }
   }
 
@@ -178,6 +228,7 @@ export function createWorld(random) {
     roads,
     blocks,
     buildings,
+    lots,
     props,
     solids,
     places,
