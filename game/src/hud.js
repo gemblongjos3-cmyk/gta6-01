@@ -140,6 +140,11 @@ export function createHud(world) {
   /** Ammo: the bar is the magazine against its reserve, the numbers exact. */
   function setAmmo(loaded, reserve, magazine = 12) {
     const pct = Math.max(0, Math.min(100, (loaded / magazine) * 100));
+    // The stylesheet colours only the health fill; the ammo fill gets its
+    // brass gradient here, and turns red when the magazine runs dry.
+    el.ammoFill.style.background = loaded > 0
+      ? 'linear-gradient(90deg, #d8a84e, #f0d089)'
+      : 'linear-gradient(90deg, #ff4f4f, #ff9a5a)';
     el.ammoFill.style.width = `${pct}%`;
     el.ammoCount.textContent = `${loaded} / ${reserve}`;
   }

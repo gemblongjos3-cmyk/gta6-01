@@ -9,7 +9,7 @@
 // Layer order inside the world pass, bottom to top:
 //   sea and sand, grass, roads, buildings, street props,
 //   (host then draws) markers, cars, people, the player, effects.
-import { COAST, FONT, PALETTE, PLAYER, ROAD, WORLD } from './config.js';
+import { COAST, FONT, PALETTE, ROAD, WORLD } from './config.js';
 import { HALF_ROAD } from './world.js';
 
 /** Multiply a #rrggbb colour toward black (f<1) or white (f>1). */
