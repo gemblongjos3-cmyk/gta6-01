@@ -159,7 +159,7 @@ export function stageShot(name, ctx) {
     hud.setMissionTag('Sunset Avenue · Downtown');
     hud.setSpeed(112, 'Sprint Coupe', true);
     hud.setCarCondition(car.health, car.maxHealth ?? CAR.health);
-    hud.setRadio('WAVE 92.4 · NEON TIDE', 'Coral Static', 'Velvet Gulls');
+    hud.setRadio('PALM 98.7 · SALTLINE', 'Coral Static', 'Velvet Gulls');
     hud.toast('Wanted 4 — the whole precinct is on you', 9);
     hud.hint('');
     // The rail, staged from the same state: dossier for mission 5 (stage
@@ -262,7 +262,7 @@ export function stageShot(name, ctx) {
       placeCar(ctx, { x: door.x + 420, y: COAST.beachTop - 30, angle: Math.PI, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 0.6 }),
       placeCar(ctx, { x: door.x - 380, y: COAST.beachTop - 30, angle: 0, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 2.8 }),
     ];
-    placeCar(ctx, { x: door.x + 190, y: COAST.beachTop + 24, angle: Math.PI / 2, kind: 'traffic', color: '#8a6fc0', model: 'van' });
+    placeCar(ctx, { x: door.x + 290, y: COAST.beachTop + 24, angle: Math.PI / 2, kind: 'traffic', color: '#8a6fc0', model: 'van' });
     police.setWanted(2);
 
     camera.x = door.x + 20;
@@ -276,7 +276,7 @@ export function stageShot(name, ctx) {
     hud.setObjective('Pier Nine · Mission 4 of 6', 'Clear the warehouse yard — 3 targets', '0:37');
     hud.setMissionTag('Pier Nine · Shrimp Row');
     hud.setSpeed(0, '', false);
-    hud.setRadio('WAVE 92.4 · NEON TIDE', 'Coral Static', 'Velvet Gulls');
+    hud.setRadio(null);
     hud.toast('Shots fired — the whole pier heard it', 9);
     hud.hint('');
     // The rail: mission 4's dossier, the PD panel from the two staged
@@ -368,7 +368,7 @@ export function stageShot(name, ctx) {
       placeCar(ctx, { x: avenue - 34, y: street - 880, angle: Math.PI / 2, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 1.1 }),
     ];
 
-    camera.x = avenue + 10;
+    camera.x = avenue - 190;
     camera.y = street + 40;
     camera.zoom = 0.9;
 
@@ -383,7 +383,7 @@ export function stageShot(name, ctx) {
     hud.setMissionTag(`${distM} m · Bayline`);
     hud.setSpeed(74, 'Cargo Van', true);
     hud.setCarCondition(van.health, van.maxHealth ?? CAR.health);
-    hud.setRadio('WAVE 92.4 · NEON TIDE', 'Coral Static', 'Velvet Gulls');
+    hud.setRadio('PALM 98.7 · SALTLINE', 'Coral Static', 'Velvet Gulls');
     hud.toast(`Checkpoint in ${distM} m — keep it rolling`, 9);
     hud.hint('');
     // The rail: mission 2 on its second step (the steal is done, the

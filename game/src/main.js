@@ -64,7 +64,7 @@ let toastQueue = []; // mission intro lines waiting their turn
 let dialogueTimer = 0; // seconds until the next queued line may show
 
 // The radio never changes station, only songs: one track every ~8 s of play.
-const RADIO_STATION = 'WAVE 92.4 · NEON TIDE';
+const RADIO_STATION = 'PALM 98.7 · SALTLINE';
 const RADIO_TRACKS = [
   ['Coral Static', 'Velvet Gulls'],
   ['Salt on the Wind', 'The Breakwaters'],
@@ -795,7 +795,10 @@ function frame(stamp) {
     camera.zoom = 0.94;
   }
 
-  render();
+  // Shot mode keeps the one staged frame runShot froze (its radar carries
+  // the staged cruisers); repainting here would redraw the radar from the
+  // live police list, which is empty before play starts.
+  if (screen !== 'shot') render();
   if (screen === 'playing' || screen === 'paused') {
     pdTimer += dt;
     updateHud();
@@ -834,13 +837,15 @@ function runShot(name) {
   hud.setWanted(result.wanted ?? 0);
   time = SHOT_TIME;
   render();
+  hud.freeze();
+  render();
   if (result.radar) {
     // The shot's own radar state wins where it provides one (route, the
     // staged cruisers as police, traffic with those cruisers filtered out).
-    hud.drawRadar({ marker: result.marker, traffic: traffic.all(), police: police.cars, blink: true, ...result.radar });
+    // It is drawn last, after the final render, so the frozen photograph
+    // keeps it instead of the live radar's empty police list.
+    hud.drawRadar({ marker: result.marker, traffic: traffic.all(), police: police.cars, blink: false, ...result.radar });
   }
-  hud.freeze();
-  render();
   document.documentElement.dataset.shotReady = '1';
   window.__shotReady = true;
 }

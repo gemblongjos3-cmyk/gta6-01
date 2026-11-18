@@ -505,8 +505,12 @@ export function createHud(world) {
   }
 
   // ------------------------------------------------------------------ radio
-  /** The radio pill: station on the left, the track playing, three EQ bars. */
+  /** The radio pill: station on the left, the track playing, three EQ bars. A null station hides the pill (on foot, there is no radio). */
   function setRadio(station, title, artist) {
+    if (!station) {
+      animate(el.radio, { autoAlpha: 0, y: 8, duration: 0.3 });
+      return;
+    }
     el.radioStation.textContent = station ?? '';
     el.radioTrack.textContent = `'${title}' — ${artist}`;
     animate(el.radio, { autoAlpha: 1, y: 0, duration: 0.3 });
@@ -728,13 +732,16 @@ export function createHud(world) {
         g.save();
         g.translate(cx, cy);
         g.rotate((car.angle ?? 0) + Math.PI / 2);
-        g.fillStyle = '#5fb2ff';
+        g.fillStyle = '#2ea8ff';
         g.beginPath();
-        g.moveTo(0, -5);
-        g.lineTo(4, 4.4);
-        g.lineTo(-4, 4.4);
+        g.moveTo(0, -7);
+        g.lineTo(5.6, 6.2);
+        g.lineTo(-5.6, 6.2);
         g.closePath();
         g.fill();
+        g.strokeStyle = 'rgba(255,255,255,0.95)';
+        g.lineWidth = 1;
+        g.stroke();
         g.restore();
       }
     }
