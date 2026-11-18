@@ -1,430 +1,495 @@
-// The HUD, in DOM so it can be animated with GSAP: the wanted stars, the wallet, the health and
-// ammo bars, the mission card with its clock, the speedometer, centre banners (BUSTED, WASTED,
-// mission passed) and the radar. The radar is its own little canvas; everything else is HTML that
-// GSAP tweens. Nothing here reads the game state directly: main.js pushes values in.
+// The heads-up display: every DOM element the player reads at a glance.
+//
+// Canvas draws the world; this module owns the layer above it — wanted
+// stars, cash, health and ammo bars, the objective card, the mission tag,
+// the speedometer, banners, toasts, hints, flashes, the start and pause
+// panels, and the radar minimap (a small canvas of its own).
+//
+// Motion belongs to GSAP. Every animated setter has two gears: the live
+// gear tweens, the static gear (setStatic(true), used by screenshot mode)
+// writes the end state with gsap.set so a photograph never catches a
+// half-finished animation.
 import { COAST, ROAD, WORLD } from './config.js';
 import { HALF_ROAD } from './world.js';
 
-const gsap = window.gsap;
+/** Grab one element by id; a missing id is a markup bug, so say so loudly. */
+function byId(id) {
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`HUD element #${id} is missing from index.html`);
+  return node;
+}
 
 export function createHud(world) {
   const el = {
-    wanted: document.getElementById('wanted'),
-    stars: Array.from(document.querySelectorAll('#wanted .star')),
-    cash: document.getElementById('cashAmount'),
-    health: document.getElementById('healthBar'),
+    root: byId('hud'),
+    wanted: byId('wanted'),
+    stars: [...document.querySelectorAll('#wanted .star')],
+    cashAmount: byId('cashAmount'),
+    healthBar: byId('healthBar'),
     healthFill: document.querySelector('#healthBar > i'),
-    ammoBar: document.querySelector('#ammoBar > i'),
-    ammoCount: document.getElementById('ammoCount'),
-    weapon: document.getElementById('weapon'),
-    objective: document.getElementById('objective'),
-    objectiveTitle: document.getElementById('objectiveTitle'),
-    objectiveText: document.getElementById('objectiveText'),
-    objectiveTimer: document.getElementById('objectiveTimer'),
-    missionTag: document.getElementById('missionTag'),
-    speedo: document.getElementById('speedo'),
-    speedValue: document.getElementById('speedValue'),
-    carName: document.getElementById('carName'),
-    banner: document.getElementById('banner'),
-    bannerBig: document.getElementById('bannerBig'),
-    bannerSmall: document.getElementById('bannerSmall'),
-    toast: document.getElementById('toast'),
-    hint: document.getElementById('hint'),
-    flash: document.getElementById('flash'),
-    canvas: document.getElementById('game'),
-    minimap: document.getElementById('minimap'),
-    start: document.getElementById('start'),
-    startPanel: document.getElementById('startPanel'),
-    pause: document.getElementById('pause'),
-    pausePanel: document.getElementById('pausePanel'),
-    title: document.getElementById('title'),
+    ammoBar: byId('ammoBar'),
+    ammoFill: document.querySelector('#ammoBar > i'),
+    weapon: byId('weapon'),
+    ammoCount: byId('ammoCount'),
+    objective: byId('objective'),
+    objectiveTitle: byId('objectiveTitle'),
+    objectiveText: byId('objectiveText'),
+    objectiveTimer: byId('objectiveTimer'),
+    missionTag: byId('missionTag'),
+    speedo: byId('speedo'),
+    speedValue: byId('speedValue'),
+    carName: byId('carName'),
+    banner: byId('banner'),
+    bannerBig: byId('bannerBig'),
+    bannerSmall: byId('bannerSmall'),
+    toast: byId('toast'),
+    hint: byId('hint'),
+    flash: byId('flash'),
+    canvas: byId('game'),
+    minimap: byId('minimap'),
+    start: byId('start'),
+    startPanel: byId('startPanel'),
+    pause: byId('pause'),
+    pausePanel: byId('pausePanel'),
+    title: byId('title'),
+    status: byId('status'),
   };
+  const radarCtx = el.minimap.getContext('2d');
 
-  const radar = el.minimap.getContext('2d');
-  let shownWanted = -1;
-  let cashShown = -1;
-  let lastBanner = null;
-  let objectiveVisible = false;
-  let kick = null;
-  /** In screenshot mode every HUD change is applied instantly, never as a tween. */
+  const hasGsap = typeof window !== 'undefined' && Boolean(window.gsap);
+  const gsap = hasGsap ? window.gsap : null;
+
   let staticMode = false;
+  let lastWanted = 0;
+  let lastCash = null;
+  let bannerTimeline = null;
+  let toastTimeline = null;
+  let entranceTimeline = null;
 
-  // ---------- wanted stars ----------
-
-  /** Light the first `level` stars; a new star punches in and the row flashes. */
-  function setWanted(level) {
-    const value = Math.max(0, Math.min(5, level));
-    if (value === shownWanted) return;
-    const rising = value > shownWanted;
-    shownWanted = value;
-    el.stars.forEach((star, index) => {
-      star.classList.toggle('lit', index < value);
-    });
-    if (rising && !staticMode) {
-      const fresh = el.stars[value - 1];
-      if (fresh) {
-        gsap.fromTo(
-          fresh,
-          { scale: 0.4, rotate: -25 },
-          { scale: 1.35, rotate: 0, duration: 0.28, ease: 'back.out(3)', yoyo: true, repeat: 1, yoyoEase: 'power1.in', overwrite: true },
-        );
-        gsap.fromTo(fresh, { filter: 'brightness(2.4)' }, { filter: 'brightness(1)', duration: 0.9, ease: 'power2.out', overwrite: true });
-      }
-      gsap.fromTo(el.wanted, { x: -3 }, { x: 0, duration: 0.5, ease: 'elastic.out(1, 0.35)', overwrite: true });
-    }
-  }
-
-  // ---------- wallet, health, ammo ----------
-
-  function setCash(money) {
-    const rounded = Math.round(money);
-    if (rounded === cashShown) return;
-    const gained = rounded > cashShown && cashShown >= 0;
-    cashShown = rounded;
-    el.cash.textContent = `$${rounded.toLocaleString('en-US')}`;
-    if (gained && !staticMode) {
-      gsap.fromTo(el.cash, { scale: 1.22, color: '#eaffd6' }, { scale: 1, color: '#b9f0a6', duration: 0.5, ease: 'power3.out', overwrite: true });
-    }
-  }
-
-  function setHealth(health, max) {
-    const ratio = Math.max(0, Math.min(1, health / max));
-    el.healthFill.style.width = `${ratio * 100}%`;
-    el.health.classList.toggle('low', ratio < 0.35);
-  }
-
-  function setAmmo(ammo, reserve, magazine) {
-    el.ammoCount.textContent = `${ammo} / ${reserve}`;
-    el.ammoBar.style.width = `${Math.max(0, Math.min(1, (ammo + reserve) / (magazine + 72))) * 100}%`;
-  }
-
-  function setWeapon(name) {
-    el.weapon.firstChild.textContent = `${name} · `;
-  }
-
-  // ---------- mission card ----------
-
-  function setObjective(title, text, timer) {
-    if (title) el.objectiveTitle.textContent = title;
-    if (text !== undefined) el.objectiveText.textContent = text;
-    el.objectiveTimer.textContent = timer ?? '';
-    el.objectiveTimer.classList.toggle('late', Boolean(timer) && Number.parseFloat(timer) < 10);
+  /** Run a tween, or jump straight to its end state in static mode. */
+  function animate(targets, vars) {
+    if (!gsap) return null;
     if (staticMode) {
-      objectiveVisible = true;
-      gsap.set(el.objective, { autoAlpha: 1, y: 0 });
-      return;
+      gsap.set(targets, vars);
+      return null;
     }
-    if (!objectiveVisible) {
-      objectiveVisible = true;
-      gsap.fromTo(el.objective, { autoAlpha: 0, y: -18 }, { autoAlpha: 1, y: 0, duration: 0.5, ease: 'power3.out', overwrite: true });
-    }
+    return gsap.to(targets, vars);
   }
 
-  function hideObjective() {
-    if (!objectiveVisible) return;
-    objectiveVisible = false;
-    gsap.to(el.objective, { autoAlpha: 0, y: -14, duration: 0.35, ease: 'power2.in', overwrite: true });
+  /** Switch every setter between tweened (play) and set (photograph). */
+  function setStatic(value) {
+    staticMode = Boolean(value);
+    if (staticMode && gsap) gsap.globalTimeline.timeScale(1000);
+    else if (gsap) gsap.globalTimeline.timeScale(1);
   }
 
-  function setMissionTag(text) {
-    el.missionTag.textContent = text;
-    if (staticMode) {
-      gsap.set(el.missionTag, { autoAlpha: 0.9, x: 0 });
-      return;
-    }
-    gsap.fromTo(el.missionTag, { autoAlpha: 0, x: -12 }, { autoAlpha: 0.9, x: 0, duration: 0.5, ease: 'power2.out', overwrite: true });
-  }
-
-  // ---------- speedometer ----------
-
-  function setSpeed(kph, name, visible) {
-    if (staticMode) {
-      el.speedValue.textContent = String(Math.round(kph));
-      el.carName.textContent = name;
-      gsap.set(el.speedo, { autoAlpha: visible ? 1 : 0, y: 0 });
-      return;
-    }
-    if (visible) {
-      el.speedValue.textContent = String(Math.round(kph));
-      el.carName.textContent = name;
-      if (gsap.getProperty(el.speedo, 'opacity') < 0.5) {
-        gsap.to(el.speedo, { autoAlpha: 1, y: 0, duration: 0.4, ease: 'power2.out', overwrite: true });
-      }
-    } else if (gsap.getProperty(el.speedo, 'opacity') > 0.05) {
-      gsap.to(el.speedo, { autoAlpha: 0, y: 10, duration: 0.3, ease: 'power2.in', overwrite: true });
-    }
-  }
-
-  // ---------- centre banner ----------
-
+  // ------------------------------------------------------------- the stars
   /**
-   * A big centre message: BUSTED, WASTED, MISSION PASSED. A timeline slides the title in, holds
-   * it, and lifts it away; `onDone` runs after the exit so the game can move on.
+   * Light `level` of the five stars. A rise earns a pulse — the whole row
+   * swells and settles — because a new star should feel like bad news.
    */
-  function banner(big, small, kind = '', onDone = null) {
-    lastBanner = { big, small, kind };
+  function setWanted(level) {
+    const clamped = Math.max(0, Math.min(5, Math.round(level)));
+    el.stars.forEach((star, i) => star.classList.toggle('lit', i < clamped));
+    el.wanted.setAttribute('aria-label', `Wanted level ${clamped} of 5`);
+    if (gsap && clamped > lastWanted && clamped > 0) {
+      if (staticMode) {
+        gsap.set(el.stars, { scale: 1 });
+      } else {
+        gsap.fromTo(
+          el.stars,
+          { scale: 1 },
+          { scale: 1.35, duration: 0.16, ease: 'power2.out', yoyo: true, repeat: 1, stagger: 0.045, overwrite: 'auto' },
+        );
+      }
+    }
+    lastWanted = clamped;
+  }
+
+  // -------------------------------------------------------------- the wallet
+  /** Cash, counted with a quick roll when it changes during play. */
+  function setCash(amount) {
+    const value = Math.max(0, Math.round(amount));
+    if (lastCash === value) return;
+    const from = lastCash ?? value;
+    lastCash = value;
+    if (!gsap || staticMode || from === value) {
+      el.cashAmount.textContent = `$${value.toLocaleString('en-US')}`;
+      return;
+    }
+    const counter = { shown: from };
+    gsap.to(counter, {
+      shown: value,
+      duration: 0.45,
+      ease: 'power1.out',
+      overwrite: 'auto',
+      onUpdate: () => {
+        el.cashAmount.textContent = `$${Math.round(counter.shown).toLocaleString('en-US')}`;
+      },
+    });
+  }
+
+  // -------------------------------------------------------------- the vitals
+  /** Health as a bar that turns angry red when it runs low. */
+  function setHealth(value, max = 100) {
+    const pct = Math.max(0, Math.min(100, (value / max) * 100));
+    el.healthFill.style.width = `${pct}%`;
+    el.healthBar.classList.toggle('low', pct <= 30);
+  }
+
+  /** Ammo: the bar is the magazine against its reserve, the numbers exact. */
+  function setAmmo(loaded, reserve, magazine = 12) {
+    const pct = Math.max(0, Math.min(100, (loaded / magazine) * 100));
+    el.ammoFill.style.width = `${pct}%`;
+    el.ammoCount.textContent = `${loaded} / ${reserve}`;
+  }
+
+  /** Name the held weapon next to its ammo count. */
+  function setWeapon(name) {
+    const label = el.weapon.firstChild;
+    if (label) label.textContent = `${name} · `;
+  }
+
+  // ------------------------------------------------------------ the objective
+  /** Show the objective card; a repeat of the same text just updates it. */
+  function setObjective(title, text, timer = '') {
+    el.objectiveTitle.textContent = title;
+    el.objectiveText.textContent = text;
+    el.objectiveTimer.textContent = timer ?? '';
+    el.objectiveTimer.classList.toggle('late', typeof timer === 'string' && timer.startsWith('0:'));
+    animate(el.objective, { autoAlpha: 1, y: 0, duration: 0.35, ease: 'power2.out' });
+  }
+
+  /** Slide the objective card away when there is nothing to chase. */
+  function hideObjective() {
+    animate(el.objective, { autoAlpha: 0, y: -8, duration: 0.3, ease: 'power2.in' });
+  }
+
+  /** The small gold tag naming where the mission is happening. */
+  function setMissionTag(text) {
+    el.missionTag.textContent = text ?? '';
+    animate(el.missionTag, { autoAlpha: text ? 1 : 0, duration: 0.3 });
+  }
+
+  // ----------------------------------------------------------- the speedometer
+  /** Speed while driving; the whole cluster hides itself on foot. */
+  function setSpeed(value, name, driving) {
+    if (!driving) {
+      animate(el.speedo, { autoAlpha: 0, y: 8, duration: 0.25 });
+      return;
+    }
+    el.speedValue.textContent = `${Math.round(Math.abs(value))}`;
+    el.carName.textContent = name ?? '';
+    animate(el.speedo, { autoAlpha: 1, y: 0, duration: 0.25 });
+  }
+
+  // ---------------------------------------------------------------- banners
+  /**
+   * The big centre banner — MISSION PASSED, BUSTED, WASTED — as one GSAP
+   * timeline: punch in, hold, drift out. endBanner cuts it short.
+   */
+  function banner(big, small = '', kind = '') {
     el.bannerBig.textContent = big;
     el.bannerSmall.textContent = small;
     el.banner.className = kind;
-    if (kick) kick.kill();
-    kick = gsap.timeline({ onComplete: () => gsap.set(el.banner, { autoAlpha: 0 }) });
-    kick
-      .fromTo(el.banner, { autoAlpha: 0, scale: 0.82 }, { autoAlpha: 1, scale: 1, duration: 0.32, ease: 'back.out(2.2)' })
-      .fromTo(el.bannerBig, { letterSpacing: '18px' }, { letterSpacing: '2px', duration: 0.7, ease: 'power3.out' }, 0)
-      .fromTo(el.bannerSmall, { autoAlpha: 0, y: 8 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: 'power2.out' }, 0.12)
-      .to(el.banner, { autoAlpha: 0, scale: 1.06, duration: 0.45, ease: 'power2.in' }, 2.6)
-      .add(() => {
-        if (onDone) onDone();
-      }, 3.0);
-    return kick;
-  }
-
-  function endBanner() {
-    if (kick) kick.kill();
-    kick = null;
-    gsap.set(el.banner, { autoAlpha: 0 });
-  }
-
-  /** A short line of help: "Press E to get in", "The coupe is here". */
-  function toast(text, seconds = 4) {
-    el.toast.textContent = text;
+    el.banner.id = 'banner';
+    if (!gsap) {
+      el.banner.style.opacity = '1';
+      return;
+    }
+    if (bannerTimeline) bannerTimeline.kill();
     if (staticMode) {
-      gsap.set(el.toast, { autoAlpha: text ? 1 : 0, y: 0, scale: 1 });
+      gsap.set(el.banner, { autoAlpha: 1, scale: 1 });
       return;
     }
-    gsap.killTweensOf(el.toast);
-    gsap.timeline()
-      .fromTo(el.toast, { autoAlpha: 0, y: 8, scale: 0.96 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.28, ease: 'power2.out' })
-      .to(el.toast, { autoAlpha: 0, y: -6, duration: 0.4, ease: 'power2.in' }, seconds);
+    bannerTimeline = gsap.timeline();
+    bannerTimeline
+      .fromTo(el.banner, { autoAlpha: 0, scale: 1.24 }, { autoAlpha: 1, scale: 1, duration: 0.32, ease: 'power3.out' })
+      .to(el.banner, { autoAlpha: 1, duration: 1.5 })
+      .to(el.banner, { autoAlpha: 0, scale: 0.96, duration: 0.45, ease: 'power2.in' });
   }
 
+  /** Hide the banner now, whatever its timeline was doing. */
+  function endBanner() {
+    if (bannerTimeline) bannerTimeline.kill();
+    bannerTimeline = null;
+    if (gsap) gsap.set(el.banner, { autoAlpha: 0 });
+    else el.banner.style.opacity = '0';
+  }
+
+  // ----------------------------------------------------------------- toasts
+  /** A one-line message pill near the bottom; newer replaces older. */
+  function toast(message, seconds = 2.6) {
+    if (!message) {
+      if (toastTimeline) toastTimeline.kill();
+      if (gsap) gsap.set(el.toast, { autoAlpha: 0 });
+      return;
+    }
+    el.toast.textContent = message;
+    el.status.textContent = message;
+    if (!gsap) {
+      el.toast.style.opacity = '1';
+      return;
+    }
+    if (toastTimeline) toastTimeline.kill();
+    if (staticMode) {
+      gsap.set(el.toast, { autoAlpha: 1, y: 0 });
+      return;
+    }
+    toastTimeline = gsap.timeline();
+    toastTimeline
+      .fromTo(el.toast, { autoAlpha: 0, y: 10 }, { autoAlpha: 1, y: 0, duration: 0.28, ease: 'power2.out' })
+      .to(el.toast, { autoAlpha: 0, duration: 0.4, ease: 'power1.in' }, `+=${Math.max(0.4, seconds)}`);
+  }
+
+  /** The quiet hint line under the toast; empty text hides it. */
   function hint(text) {
-    if (!text) {
-      gsap.to(el.hint, { autoAlpha: 0, duration: 0.2, overwrite: true });
+    el.hint.textContent = text ?? '';
+    animate(el.hint, { autoAlpha: text ? 1 : 0, duration: 0.25 });
+  }
+
+  // ---------------------------------------------------------------- effects
+  /** A full-screen colour wash: blue for the law, red for the hurt. */
+  function flash(kind) {
+    el.flash.className = kind === 'blue' ? 'blue' : 'red';
+    el.flash.id = 'flash';
+    if (!gsap) return;
+    if (staticMode) {
+      gsap.set(el.flash, { opacity: 0.85 });
       return;
     }
-    if (el.hint.textContent === text && gsap.getProperty(el.hint, 'opacity') > 0.5) return;
-    el.hint.textContent = text;
-    gsap.to(el.hint, { autoAlpha: 1, duration: 0.2, overwrite: true });
+    gsap.fromTo(el.flash, { opacity: 0.9 }, { opacity: 0, duration: 0.7, ease: 'power2.out', overwrite: 'auto' });
   }
 
-  // ---------- flashes and shakes ----------
-
-  function flash(kind, strength = 1) {
-    el.flash.className = kind;
-    gsap.fromTo(el.flash, { opacity: 0 }, { opacity: 0.85 * strength, duration: 0.1, ease: 'power2.out', overwrite: true }).then(() => {
-      gsap.to(el.flash, { opacity: 0, duration: 0.8, ease: 'power2.in' });
-    });
-  }
-
-  function shake(strength = 6, duration = 0.15) {
-    gsap.killTweensOf(el.canvas);
+  /** Shake the whole game view — collisions and nearby gunfire live here. */
+  function shake(amount = 6) {
+    if (!gsap || staticMode) return;
+    const strength = Math.max(2, Math.min(14, amount));
     gsap.fromTo(
       el.canvas,
-      { x: 0, y: 0 },
-      {
-        keyframes: [
-          { x: -strength, y: strength * 0.4, duration: duration * 0.25 },
-          { x: strength * 0.8, y: -strength * 0.3, duration: duration * 0.25 },
-          { x: -strength * 0.4, y: strength * 0.2, duration: duration * 0.25 },
-          { x: 0, y: 0, duration: duration * 0.25 },
-        ],
-        ease: 'power1.out',
-      },
+      { x: -strength, y: strength * 0.6 },
+      { x: 0, y: 0, duration: 0.32, ease: 'elastic.out(1, 0.35)', overwrite: 'auto' },
     );
   }
 
-  /** A damage wobble on the whole HUD layer, so a bad hit is felt. */
-  function jolt(strength = 4) {
-    gsap.fromTo(el.canvas, { filter: 'brightness(1.5) saturate(1.4)' }, { filter: 'brightness(1) saturate(1)', duration: 0.35, ease: 'power2.out', overwrite: 'auto' });
-    shake(strength, 0.15);
+  /** A smaller, sharper jolt for a single hit landing on the player. */
+  function jolt() {
+    if (!gsap || staticMode) return;
+    gsap.fromTo(el.root, { x: -3 }, { x: 0, duration: 0.18, ease: 'power2.out', overwrite: 'auto' });
   }
 
-  // ---------- the radar ----------
-
-  const RADAR_RANGE = 620;
-
-  /** Paint the round minimap: roads, the sea band, then the player, police, traffic and marker. */
+  // ------------------------------------------------------------------ radar
+  /**
+   * The minimap: a 200px circle of city centred on the player. Roads and
+   * the shoreline give the geography; dots give the life — traffic in grey,
+   * police in blue, the objective in gold, the player as a white arrow.
+   * state: { x, y, aim, marker, traffic, police, blink }
+   */
   function drawRadar(state) {
-    const size = el.minimap.width;
-    const radius = size / 2;
-    const range = RADAR_RANGE;
-    const scale = radius / range;
-    radar.setTransform(1, 0, 0, 1, 0, 0);
-    radar.clearRect(0, 0, size, size);
-    radar.save();
-    radar.beginPath();
-    radar.arc(radius, radius, radius, 0, Math.PI * 2);
-    radar.clip();
-    radar.fillStyle = '#201a2a';
-    radar.fillRect(0, 0, size, size);
-    radar.translate(radius, radius);
-    radar.scale(scale, scale);
-    radar.translate(-state.x, -state.y);
-    radar.rotate(-state.rotate ?? 0);
+    const g = radarCtx;
+    const size = el.minimap.width || 200;
+    const half = size / 2;
+    const range = 1150; // world pixels from centre to rim
+    const scale = half / range;
+    const px = state.x;
+    const py = state.y;
 
-    // Sea.
-    if (state.y + range > COAST.waterline) {
-      radar.fillStyle = '#1d5a67';
-      radar.fillRect(state.x - range, COAST.waterline, range * 2, range * 2);
-      radar.fillStyle = '#e8c891';
-      radar.fillRect(state.x - range, COAST.waterline - 90, range * 2, 90);
-    }
-    // Roads, clipped to the visible disc's world bounds.
-    radar.fillStyle = '#4a4356';
-    radar.fillRect(state.x - range, state.y - range, range * 2, range * 2);
-    radar.fillStyle = '#111018';
-    for (const avenue of ROAD.avenueX) radar.fillRect(avenue - HALF_ROAD, state.y - range, HALF_ROAD * 2, range * 2);
-    for (const street of ROAD.streetY) radar.fillRect(state.x - range, street - HALF_ROAD, range * 2, HALF_ROAD * 2);
-    // Blocks in the gaps look like the buildings they hold.
-    radar.fillStyle = 'rgba(255, 214, 160, 0.10)';
-    for (const block of world.blocks) {
-      if (block.left > state.x + range || block.right < state.x - range) continue;
-      if (block.top > state.y + range || block.bottom < state.y - range) continue;
-      radar.fillRect(block.left, block.top, block.width, block.height);
-    }
+    g.clearRect(0, 0, size, size);
+    g.save();
+    g.beginPath();
+    g.arc(half, half, half - 1, 0, Math.PI * 2);
+    g.clip();
 
-    // Traffic: soft white dashes.
-    radar.fillStyle = 'rgba(235, 235, 245, 0.55)';
-    for (const car of state.traffic ?? []) {
-      if (Math.abs(car.x - state.x) > range || Math.abs(car.y - state.y) > range) continue;
-      radar.fillRect(car.x - 5, car.y - 5, 10, 10);
+    g.fillStyle = '#4c7350';
+    g.fillRect(0, 0, size, size);
+    // Sea along the bottom of the world, wherever the view reaches it.
+    const seaY = half + (COAST.waterline - py) * scale;
+    if (seaY < size) {
+      g.fillStyle = '#2f7f8c';
+      g.fillRect(0, Math.max(0, seaY), size, size - Math.max(0, seaY));
     }
-    // Police: flashing blue dots.
-    for (const car of state.police ?? []) {
-      if (Math.abs(car.x - state.x) > range || Math.abs(car.y - state.y) > range) continue;
-      radar.fillStyle = state.blink ? '#8fd0ff' : '#3f8fe8';
-      radar.beginPath();
-      radar.arc(car.x, car.y, 8, 0, Math.PI * 2);
-      radar.fill();
+    const sandY = half + (COAST.beachTop - py) * scale;
+    if (sandY < size && seaY > 0) {
+      g.fillStyle = '#cfae7a';
+      g.fillRect(0, Math.max(0, sandY), size, Math.max(0, Math.min(size, seaY) - Math.max(0, sandY)));
     }
-    radar.restore();
-
-    // The mission marker sits on the rim when it is out of range, so the radar always points the way.
-    if (state.marker) {
-      const dx = state.marker.x - state.x;
-      const dy = state.marker.y - state.y;
-      const distance = Math.hypot(dx, dy);
-      const angle = Math.atan2(dy, dx) - (state.rotate ?? 0);
-      const clamped = Math.min(distance * scale, radius - 11);
-      const mx = radius + Math.cos(angle) * clamped;
-      const my = radius + Math.sin(angle) * clamped;
-      radar.save();
-      radar.translate(mx, my);
-      radar.rotate(Math.PI / 4);
-      radar.fillStyle = '#ffc94d';
-      radar.shadowColor = '#ffc94d';
-      radar.shadowBlur = 8;
-      radar.fillRect(-5.5, -5.5, 11, 11);
-      radar.restore();
+    // Roads as pale lines on the grid.
+    g.strokeStyle = 'rgba(240,232,214,0.5)';
+    g.lineWidth = Math.max(2, ROAD.width * scale * 0.7);
+    for (const ax of ROAD.avenueX) {
+      const sx = half + (ax - px) * scale;
+      if (sx < -8 || sx > size + 8) continue;
+      g.beginPath();
+      g.moveTo(sx, 0);
+      g.lineTo(sx, size);
+      g.stroke();
     }
+    for (const sy of ROAD.streetY) {
+      const yy = half + (sy - py) * scale;
+      if (yy < -8 || yy > size + 8) continue;
+      g.beginPath();
+      g.moveTo(0, yy);
+      g.lineTo(size, yy);
+      g.stroke();
+    }
+    void world;
+    void HALF_ROAD;
 
-    // The player: a white arrow pointing where they face.
-    radar.save();
-    radar.translate(radius, radius);
-    radar.rotate((state.aim ?? 0) - (state.rotate ?? 0));
-    radar.fillStyle = '#fff4e4';
-    radar.beginPath();
-    radar.moveTo(9, 0);
-    radar.lineTo(-6, -6);
-    radar.lineTo(-3, 0);
-    radar.lineTo(-6, 6);
-    radar.closePath();
-    radar.fill();
-    radar.restore();
+    const blip = (wx, wy, r, color) => {
+      const sx = half + (wx - px) * scale;
+      const sy = half + (wy - py) * scale;
+      const dx = sx - half;
+      const dy = sy - half;
+      const dist = Math.hypot(dx, dy);
+      const rim = half - 6;
+      const cx = dist > rim ? half + (dx / dist) * rim : sx;
+      const cy = dist > rim ? half + (dy / dist) * rim : sy;
+      g.fillStyle = color;
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.fill();
+      return dist > rim;
+    };
 
-    // A north tick, so the radar reads as a compass.
-    radar.fillStyle = 'rgba(255, 244, 228, 0.7)';
-    radar.font = '700 11px system-ui, sans-serif';
-    radar.textAlign = 'center';
-    radar.textBaseline = 'middle';
-    radar.fillText('N', radius, 12);
+    for (const car of state.traffic ?? []) blip(car.x, car.y, 2.2, 'rgba(220,220,228,0.75)');
+    const blinkOn = state.blink === false ? true : Math.floor(performance.now() / 420) % 2 === 0;
+    if (blinkOn) for (const car of state.police ?? []) blip(car.x, car.y, 3.2, '#5fb2ff');
+    if (state.marker) blip(state.marker.x, state.marker.y, 4, '#ffc94d');
+
+    // The player: a white arrow that turns with the aim.
+    g.save();
+    g.translate(half, half);
+    g.rotate((state.aim ?? 0) + Math.PI / 2);
+    g.fillStyle = '#fff7ea';
+    g.beginPath();
+    g.moveTo(0, -8);
+    g.lineTo(5.4, 6);
+    g.lineTo(0, 3);
+    g.lineTo(-5.4, 6);
+    g.closePath();
+    g.fill();
+    g.restore();
+
+    g.restore();
+    // North tick, fixed to the rim.
+    g.fillStyle = 'rgba(255,244,228,0.85)';
+    g.font = '700 10px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.fillText('N', half, 13);
   }
 
-  // ---------- the title and pause screens ----------
-
-  /** Build the start screen's entrance: title drops in, menu items stagger, controls fade up. */
+  // ------------------------------------------------------------ start screen
+  /**
+   * The title entrance, one timeline: the name drops in, the menu staggers
+   * up, and a little coupe silhouette crosses the panel's foot. Returned so
+   * screenshot mode can drive it straight to its end state.
+   */
   function enterStart() {
-    el.start.style.visibility = 'visible';
-    gsap.set(el.start, { autoAlpha: 1 });
-    const items = el.startPanel.querySelectorAll('.item');
-    const controls = el.startPanel.querySelectorAll('.controls span');
-    const timeline = gsap.timeline();
-    timeline
-      .fromTo(el.startPanel, { autoAlpha: 0, y: 26, scale: 0.985 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.6, ease: 'power3.out' })
-      .fromTo(el.title, { y: -34, autoAlpha: 0, letterSpacing: '14px' }, { y: 0, autoAlpha: 1, letterSpacing: '-1px', duration: 0.9, ease: 'power3.out' }, 0.05)
-      .fromTo(items, { y: 14, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.4, stagger: 0.08, ease: 'power2.out' }, 0.3)
-      .fromTo(controls, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, stagger: 0.03, ease: 'power1.out' }, 0.5);
-    return timeline;
+    if (gsap) gsap.set(el.start, { autoAlpha: 1, visibility: 'visible' });
+    el.start.style.pointerEvents = 'none';
+    if (!gsap) return null;
+    if (entranceTimeline) entranceTimeline.kill();
+
+    // A coupe that crosses once under the story text — pure decoration.
+    let coupe = document.getElementById('startCoupe');
+    if (!coupe) {
+      coupe = document.createElement('div');
+      coupe.id = 'startCoupe';
+      coupe.style.cssText = [
+        'position:absolute',
+        'left:0',
+        'bottom:12px',
+        'width:64px',
+        'height:20px',
+        'border-radius:10px 14px 6px 6px',
+        'background:linear-gradient(180deg,#f0a24a,#e2574c)',
+        'box-shadow:0 4px 10px rgba(0,0,0,0.45)',
+        'opacity:0.9',
+      ].join(';');
+      el.startPanel.appendChild(coupe);
+    }
+
+    entranceTimeline = gsap.timeline({ defaults: { ease: 'power3.out' } });
+    entranceTimeline
+      .fromTo(el.startPanel, { autoAlpha: 0, y: 26, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.55 })
+      .fromTo(el.title, { autoAlpha: 0, y: -46 }, { autoAlpha: 1, y: 0, duration: 0.6 }, '-=0.25')
+      .fromTo('#startMenu .item', { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.4, stagger: 0.08 }, '-=0.2')
+      .fromTo(coupe, { x: -90, autoAlpha: 0 }, { x: 640, autoAlpha: 1, duration: 1.15, ease: 'power1.inOut' }, '-=0.5')
+      .to(coupe, { autoAlpha: 0, duration: 0.25 }, '-=0.1');
+    if (staticMode) entranceTimeline.progress(1);
+    return entranceTimeline;
   }
 
-  function hideStart(onDone) {
-    gsap.to(el.start, {
-      autoAlpha: 0,
-      duration: 0.45,
-      ease: 'power2.inOut',
-      onComplete: () => {
-        el.start.style.visibility = 'hidden';
-        if (onDone) onDone();
-      },
-    });
+  /** Fold the start screen away when the evening begins. */
+  function hideStart() {
+    if (!gsap) {
+      el.start.style.opacity = '0';
+      el.start.style.visibility = 'hidden';
+      return;
+    }
+    animate(el.start, { autoAlpha: 0, duration: 0.45, ease: 'power2.inOut' });
   }
 
+  // ------------------------------------------------------------------ pause
+  /** Pause panel in, with a small rise; the game view stays behind it. */
   function showPause() {
-    el.pause.style.visibility = 'visible';
-    gsap.timeline()
-      .to(el.pause, { autoAlpha: 1, duration: 0.25, ease: 'power2.out' })
-      .fromTo(el.pausePanel, { y: 24, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.35, ease: 'power3.out' }, 0);
+    if (!gsap) {
+      el.pause.style.opacity = '1';
+      el.pause.style.visibility = 'visible';
+      return;
+    }
+    if (staticMode) gsap.set(el.pause, { autoAlpha: 1 });
+    else {
+      gsap.to(el.pause, { autoAlpha: 1, duration: 0.3, ease: 'power2.out' });
+      gsap.fromTo(el.pausePanel, { y: 14 }, { y: 0, duration: 0.35, ease: 'power3.out' });
+    }
   }
 
-  function hidePause(onDone) {
-    gsap.to(el.pause, {
-      autoAlpha: 0,
-      duration: 0.25,
-      ease: 'power2.in',
-      onComplete: () => {
-        el.pause.style.visibility = 'hidden';
-        if (onDone) onDone();
-      },
-    });
+  /** Pause panel out again. */
+  function hidePause() {
+    if (!gsap) {
+      el.pause.style.opacity = '0';
+      el.pause.style.visibility = 'hidden';
+      return;
+    }
+    animate(el.pause, { autoAlpha: 0, duration: 0.25, ease: 'power2.in' });
   }
 
-  /** The HUD slides in when play begins: each corner group eases in from its edge. */
+  // ------------------------------------------------------------ mode changes
+  /**
+   * Into play: the HUD groups arrive with a stagger — stars, cash, vitals,
+   * radar — like instruments lighting up one after another.
+   */
   function enterPlay() {
-    gsap.fromTo(el.wanted, { autoAlpha: 0, x: -26 }, { autoAlpha: 1, x: 0, duration: 0.5, ease: 'power3.out' });
-    gsap.fromTo(document.getElementById('cash'), { autoAlpha: 0, x: 26 }, { autoAlpha: 1, x: 0, duration: 0.5, ease: 'power3.out', delay: 0.05 });
-    gsap.fromTo(document.getElementById('vitals'), { autoAlpha: 0, x: 26 }, { autoAlpha: 1, x: 0, duration: 0.5, ease: 'power3.out', delay: 0.12 });
-    gsap.fromTo(document.getElementById('minimapWrap'), { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.6, ease: 'power3.out', delay: 0.08 });
-    gsap.fromTo(el.weapon, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.5, delay: 0.2 });
-  }
-
-  function hideHud() {
-    gsap.to([el.wanted, document.getElementById('cash'), document.getElementById('vitals'), document.getElementById('minimapWrap'), el.weapon], {
-      autoAlpha: 0,
-      duration: 0.4,
-      ease: 'power2.in',
-    });
-    hideObjective();
-  }
-
-  /** Clear every running HUD tween: used when a staged screenshot is taken. */
-  function freeze() {
-    gsap.killTweensOf([el.banner, el.bannerBig, el.bannerSmall, el.toast, el.objective, el.flash, el.canvas, el.speedo]);
-    gsap.set(el.canvas, { x: 0, y: 0, filter: 'none' });
-    gsap.set(el.flash, { opacity: 0 });
-  }
-
-  /** Screenshot mode: from here on every HUD write lands at its final value at once. */
-  function setStatic(value) {
-    staticMode = Boolean(value);
+    hideStart();
+    if (!gsap) return;
+    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon'];
     if (staticMode) {
-      gsap.set([el.wanted, document.getElementById('cash'), document.getElementById('vitals'), document.getElementById('minimapWrap'), el.weapon], { autoAlpha: 1, x: 0, y: 0 });
-      gsap.set(el.canvas, { x: 0, y: 0, filter: 'none' });
-      gsap.set(el.flash, { opacity: 0 });
+      gsap.set(groups, { autoAlpha: 1, y: 0 });
+      return;
+    }
+    gsap.fromTo(groups, { autoAlpha: 0, y: -10 }, { autoAlpha: 1, y: 0, duration: 0.45, ease: 'power2.out', stagger: 0.07, overwrite: 'auto' });
+  }
+
+  /** Hide every HUD group at once (the start screen owns the frame). */
+  function hideHud() {
+    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective', '#speedo', '#missionTag', '#toast', '#hint'];
+    if (gsap) gsap.set(groups, { autoAlpha: 0 });
+  }
+
+  /**
+   * Freeze every animation at its current end state: screenshot mode calls
+   * this after staging, so nothing on screen is mid-tween when photographed.
+   */
+  function freeze() {
+    if (!gsap) return;
+    for (const tween of gsap.globalTimeline.getChildren(true, true, true)) {
+      tween.progress(1);
     }
   }
 
   return {
+    el,
     setStatic,
     setWanted,
     setCash,
@@ -450,10 +515,6 @@ export function createHud(world) {
     enterPlay,
     hideHud,
     freeze,
-    get bannerShown() {
-      return lastBanner;
-    },
-    el,
   };
 }
 
