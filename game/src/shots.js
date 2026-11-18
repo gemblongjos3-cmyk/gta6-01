@@ -134,7 +134,7 @@ export function stageShot(name, ctx) {
     combat.muzzleHold = true;
 
     camera.x = avenue + 20;
-    camera.y = street + 400;
+    camera.y = street + 335;
     camera.zoom = 0.92;
 
     // A drift trail off the coupe's rear wheels: the car is mid-corner, not parked.
