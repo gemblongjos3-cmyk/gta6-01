@@ -97,6 +97,9 @@ export function stageShot(name, ctx) {
     placeCar(ctx, { x: avenue + 300, y: street + 70, angle: Math.PI, kind: 'traffic', color: '#4fa3c7' });
     placeCar(ctx, { x: avenue + 70, y: street - 260, angle: Math.PI / 2, kind: 'traffic', color: '#c9c9d1', model: 'van' });
     placeCar(ctx, { x: avenue - 150, y: street + 40, angle: Math.PI, kind: 'traffic', color: '#7bbf6a' });
+    placeCar(ctx, { x: avenue - 640, y: street - 70, angle: 0, kind: 'traffic', color: '#e8d27a', model: 'van' });
+    placeCar(ctx, { x: avenue + 520, y: street + 70, angle: Math.PI, kind: 'traffic', color: '#3a4250' });
+    placeCar(ctx, { x: avenue - 96, y: street + 300, angle: Math.PI, kind: 'parked', color: '#8a6fc0', model: 'sport' });
 
     // A few pedestrians on the corner, one already running.
     for (let index = 0; index < 7; index += 1) {
@@ -108,11 +111,26 @@ export function stageShot(name, ctx) {
       person.speed = person.state === 'flee' ? 190 : 50;
     }
     pedestrians.people[2].panic = 4;
+    // And a second knot of them across the avenue, scattering from the sirens.
+    for (let index = 7; index < 12; index += 1) {
+      const person = pedestrians.people[index];
+      person.x = avenue + 120 + (index - 7) * 34;
+      person.y = street + 130 + (index % 2) * 26;
+      person.angle = 2.6;
+      person.state = index === 8 ? 'flee' : 'walk';
+      person.speed = person.state === 'flee' ? 190 : 46;
+    }
+    pedestrians.people[8].panic = 4;
+
+    // One Sunset Star glints on the west pavement: the hunt runs through downtown too.
+    ctx.collectibles.placeStar(0, avenue - 122, street + 190);
 
     // Bullets already in the air, one muzzle flash, smoke off the player's fender.
     combat.shoot(car.x + 24, car.y - 30, -Math.PI / 2 + 0.06, { hostile: false, damage: 30 });
     combat.shoot(avenue + 8, street + 392, -Math.PI / 2, { hostile: true, damage: 22 });
     combat.shoot(avenue - 30, street + 470, -Math.PI / 2 + 0.1, { hostile: true, damage: 22 });
+    combat.spark(car.x + 26, car.y + 6, 0.5, '#ffc46a');
+    combat.spark(avenue + 44, street + 420, -0.8, '#ffd9a0');
     combat.muzzleHold = true;
 
     camera.x = avenue + 20;
@@ -265,6 +283,8 @@ export function stageShot(name, ctx) {
     placeCar(ctx, { x: avenue + 34, y: street - 150, angle: -Math.PI / 2, kind: 'traffic', color: '#7bbf6a' });
     placeCar(ctx, { x: avenue + 300, y: street + 40, angle: Math.PI, kind: 'traffic', color: '#e2574c' });
     placeCar(ctx, { x: avenue + 34, y: street - 520, angle: -Math.PI / 2, kind: 'traffic', color: '#8a6fc0' });
+    placeCar(ctx, { x: avenue - 320, y: street - 36, angle: 0, kind: 'traffic', color: '#f0a24a' });
+    placeCar(ctx, { x: avenue + 430, y: street + 38, angle: Math.PI, kind: 'traffic', color: '#c9c9d1', model: 'van' });
 
     for (let index = 0; index < 6; index += 1) {
       const person = pedestrians.people[index];
@@ -273,6 +293,14 @@ export function stageShot(name, ctx) {
       person.angle = Math.PI / 2;
       person.state = 'walk';
       person.speed = 58;
+    }
+    for (let index = 6; index < 10; index += 1) {
+      const person = pedestrians.people[index];
+      person.x = avenue + 100 + (index % 2) * 24;
+      person.y = street - 40 + (index - 6) * 82;
+      person.angle = -Math.PI / 2;
+      person.state = 'walk';
+      person.speed = 54;
     }
     police.setWanted(1);
     placeCar(ctx, { x: avenue - 34, y: street - 880, angle: Math.PI / 2, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 1.1 });

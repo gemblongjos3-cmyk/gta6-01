@@ -318,6 +318,17 @@ export function createHud(world) {
       g.fillStyle = '#cfae7a';
       g.fillRect(0, Math.max(0, sandY), size, Math.max(0, Math.min(size, seaY) - Math.max(0, sandY)));
     }
+    // Building footprints first, so the map reads as a city of blocks and not an empty
+    // green grid: every roof in range as a dark slate slab under the road lines.
+    g.fillStyle = 'rgba(26,32,30,0.6)';
+    for (const b of world.buildings ?? []) {
+      const bx = half + (b.x - px) * scale;
+      const by = half + (b.y - py) * scale;
+      const bw = b.w * scale;
+      const bh = b.h * scale;
+      if (bx + bw < 0 || by + bh < 0 || bx > size || by > size) continue;
+      g.fillRect(bx, by, bw, bh);
+    }
     // Roads as pale lines on the grid.
     g.strokeStyle = 'rgba(240,232,214,0.5)';
     g.lineWidth = Math.max(2, ROAD.width * scale * 0.7);

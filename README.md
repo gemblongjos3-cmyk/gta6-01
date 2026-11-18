@@ -25,6 +25,12 @@ marina and back, each with its own reward and progress saved between sessions:
 5. **Heat Line** — shake the police until the wanted level reaches zero.
 6. **The Long Goodnight** — drive the boss across the city to the marina under a 3-star wanted level.
 
+## Side hunt — Sunset Stars
+
+Twelve gold **Sunset Stars** stand hidden across the districts — downtown corners, dockside
+pavements, the far avenues. Roll over one on foot or in a car to bank it for **+$150**; the
+set is saved with your progress, and the hunt gives every free drive a direction.
+
 ## Controls
 
 | Input | Action |

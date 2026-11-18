@@ -9,7 +9,7 @@
 // the simulation is the same on a 60 Hz laptop and a 144 Hz monitor. The
 // camera is the one thing that does not step: GSAP quickTo eases it after
 // the player every frame, which is what makes the chase feel smooth.
-import { CAMERA, CRIME, PLAYER, SAVE_KEY, STEP } from './config.js';
+import { CAMERA, CRIME, PLAYER, SAVE_KEY, STARS, STEP } from './config.js';
 import { createRandom } from './random.js';
 import { createWorld } from './world.js';
 import { createTraffic } from './traffic.js';
@@ -18,6 +18,7 @@ import { createPlayer } from './player.js';
 import { createPolice } from './police.js';
 import { createCombat } from './combat.js';
 import { createMissions } from './missions.js';
+import { createCollectibles } from './collectibles.js';
 import { createAudio } from './audio.js';
 import { createRenderer } from './render.js';
 import { createHud } from './hud.js';
@@ -37,6 +38,7 @@ const player = createPlayer(world);
 const police = createPolice(world, random);
 const combat = createCombat(world);
 const missions = createMissions(world, random);
+const collectibles = createCollectibles(world, random);
 const audio = createAudio();
 
 const canvas = document.getElementById('game');
@@ -101,6 +103,7 @@ function writeSave() {
     window.localStorage.setItem(SAVE_KEY, JSON.stringify({
       completed: missions.completed,
       money: player.state.money,
+      stars: collectibles.takenIds(),
     }));
   } catch {
     // A browser that refuses storage still gets a game; it just forgets.
@@ -114,6 +117,7 @@ function resetSave() {
     // Nothing to forget.
   }
   missions.load({ completed: 0 });
+  collectibles.load([]);
   player.state.money = 250;
 }
 
@@ -318,9 +322,11 @@ function beginPlay(fromSave) {
   if (save) {
     missions.load({ completed: Number(save.completed) || 0 });
     player.state.money = Number(save.money) || 250;
+    collectibles.load(save.stars);
   } else {
     missions.load({ completed: 0 });
     player.state.money = 250;
+    collectibles.load([]);
   }
   player.spawnAt();
   police.reset();
@@ -564,6 +570,19 @@ function stepGame(dt) {
   if (missions.takeCompleted()) completeMission(before);
   if (missions.takeFailed()) failMission();
 
+  // The star hunt ticks beside the story: roll over a Sunset Star, bank its cash.
+  collectibles.update(p, (star, banked) => {
+    player.addMoney(STARS.reward);
+    audio.cash();
+    hud.toast(
+      banked >= STARS.count
+        ? `Sunset Star ${banked} of ${STARS.count} — the whole set. +$${STARS.reward}`
+        : `Sunset Star ${banked} of ${STARS.count} — +$${STARS.reward}`,
+      2.6,
+    );
+    writeSave();
+  });
+
   if (nextMissionTimer > 0) {
     nextMissionTimer -= dt;
     if (nextMissionTimer <= 0 && !missions.active && screen === 'playing') beginMission();
@@ -608,6 +627,7 @@ function render() {
   for (const actor of actors) renderer.drawActor(actor);
   renderer.drawPlayer(p, time);
   renderer.drawEffects(combat, traffic.skids, time);
+  renderer.drawStars(collectibles.stars, time);
   renderer.endFrame(camera);
   if (screen !== 'start') {
     hud.drawRadar({
@@ -686,6 +706,7 @@ function runShot(name) {
     police,
     combat,
     missions,
+    collectibles,
     hud,
     camera,
     actors,

@@ -211,6 +211,12 @@ export function createRenderer(canvas) {
     ctx.strokeStyle = b.trim;
     ctx.lineWidth = 3;
     ctx.strokeRect(b.x + 5, b.y + 5, b.w - 10, b.h - 10);
+    // The roof inside the parapet: a darker panel of its own, so a block from above reads as
+    // rooftops with edges and furniture, not as flat slabs of colour.
+    ctx.fillStyle = tint(b.color, 0.8);
+    ctx.fillRect(b.x + 13, b.y + 13, b.w - 26, b.h - 26);
+    ctx.fillStyle = tint(b.color, 1.04);
+    ctx.fillRect(b.x + 19, b.y + 19, b.w - 38, b.h - 38);
     if (b.rooftop === 'ac') {
       ctx.fillStyle = 'rgba(70,70,84,0.55)';
       ctx.fillRect(b.x + b.w * 0.18, b.y + b.h * 0.2, 26, 18);
@@ -222,11 +228,43 @@ export function createRenderer(canvas) {
       ctx.fill();
     }
     if (b.windows) paintWindows(b, time);
+    paintDoor(b);
+    if (b.name) paintAwning(b);
     if (b.name) paintSign(b, time);
   }
 
-  /** A grid of windows; most are lit at dusk, a few flicker with the hour. */
+  /** The street door: a dark leaf with a lit transom, centred on the pavement side. */
+  function paintDoor(b) {
+    const w = 16;
+    const h = 7;
+    const x = b.cx - w / 2;
+    const y = b.y + b.h - h - 1;
+    ctx.fillStyle = 'rgba(24,20,32,0.85)';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(255,217,147,0.75)';
+    ctx.fillRect(x + 2, y + 1.4, w - 4, 2);
+  }
+
+  /** A striped canopy over the shopfront, in the sign's neon and cream. */
+  function paintAwning(b) {
+    const w = Math.min(b.w - 30, 118);
+    const x = b.cx - w / 2;
+    const y = b.y + b.h - 44;
+    const stripe = 11;
+    const neon = b.neon ?? b.trim;
+    for (let sx = 0; sx < w; sx += stripe) {
+      ctx.fillStyle = Math.floor(sx / stripe) % 2 === 0 ? neon : 'rgba(246,238,224,0.92)';
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(x + sx, y, Math.min(stripe, w - sx), 9);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(20,14,28,0.35)';
+    ctx.fillRect(x, y + 9, w, 3);
+  }
+
+  /** Windows in one of two dialects: a lit grid, or long horizontal bands on the modern blocks. */
   function paintWindows(b, time) {
+    if (jitter(b.seed * 3 + 11) < 0.38) return paintWindowBands(b, time);
     const cols = Math.max(2, Math.floor(b.w / 30));
     const rows = Math.max(2, Math.floor(b.h / 30));
     const cw = b.w / cols;
@@ -247,6 +285,28 @@ export function createRenderer(canvas) {
         }
         ctx.fillRect(x, y, w, h);
       }
+    }
+  }
+
+  /** Horizontal window bands: floor-to-ceiling glass strips, lit in long warm runs. */
+  function paintWindowBands(b, time) {
+    const rows = Math.max(2, Math.floor(b.h / 34));
+    const ch = b.h / rows;
+    for (let cy = 0; cy < rows; cy += 1) {
+      const seed = b.seed + cy * 71;
+      const lit = jitter(seed);
+      const y = b.y + cy * ch + ch * 0.3;
+      const h = ch * 0.4;
+      if (lit > 0.3) {
+        const warm = 0.82 + 0.18 * Math.sin(time * 0.5 + seed);
+        ctx.fillStyle = `rgba(255,217,147,${0.35 + 0.45 * warm * lit})`;
+      } else {
+        ctx.fillStyle = PALETTE.glass;
+      }
+      ctx.fillRect(b.x + 16, y, b.w - 32, h);
+      // Mullions break the strip into panes.
+      ctx.fillStyle = tint(b.color, 0.8);
+      for (let x = b.x + 16 + 26; x < b.x + b.w - 32; x += 26) ctx.fillRect(x, y, 3, h);
     }
   }
 
@@ -278,6 +338,7 @@ export function createRenderer(canvas) {
     if (!visible(prop.x, prop.y, 60)) return;
     if (prop.kind === 'palm') return paintPalm(prop, time);
     if (prop.kind === 'lamp') return paintLamp(prop, time);
+    if (prop.kind === 'crate') return paintCrate(prop);
     if (prop.kind === 'hydrant') {
       ctx.fillStyle = '#c94f43';
       ctx.fillRect(prop.x - 4, prop.y - 7, 8, 12);
@@ -324,6 +385,28 @@ export function createRenderer(canvas) {
     return undefined;
   }
 
+  /** A dockside crate: planked faces, a darker frame, a second box on top when stacked. */
+  function paintCrate(prop) {
+    const s = prop.size ?? 15;
+    const drawBox = (cx, cy, half) => {
+      ctx.fillStyle = '#9a744e';
+      ctx.fillRect(cx - half, cy - half, half * 2, half * 2);
+      ctx.strokeStyle = '#6f5136';
+      ctx.lineWidth = 2.4;
+      ctx.strokeRect(cx - half + 2, cy - half + 2, half * 2 - 4, half * 2 - 4);
+      ctx.beginPath();
+      ctx.moveTo(cx - half + 2, cy - half + 2);
+      ctx.lineTo(cx + half - 2, cy + half - 2);
+      ctx.moveTo(cx + half - 2, cy - half + 2);
+      ctx.lineTo(cx - half + 2, cy + half - 2);
+      ctx.stroke();
+    };
+    groundShadow(prop.x, prop.y + 4, s + 6, s * 0.6);
+    drawBox(prop.x, prop.y, s);
+    if (prop.stack === 2) drawBox(prop.x + 3, prop.y - 4, s * 0.66);
+    return undefined;
+  }
+
   /** A street lamp: slim pole and a pool of warm light on the pavement. */
   function paintLamp(prop, time) {
     const flicker = 0.9 + 0.1 * Math.sin(time * 7 + prop.x);
@@ -358,9 +441,46 @@ export function createRenderer(canvas) {
     paintBeach();
     paintSea(time);
     paintRoads();
+    for (const lot of world.lots ?? []) paintLot(lot);
     const sorted = world.buildings.slice().sort((a, b) => a.y - b.y);
     for (const building of sorted) paintBuilding(building, time);
     for (const prop of props) paintProp(prop, time);
+  }
+
+  /**
+   * A parking lot: worn asphalt, a faded centre line, painted bays along both edges and the
+   * locked cars standing in them, drawn with the same hand as every other car in the city.
+   */
+  function paintLot(lot) {
+    const { pad } = lot;
+    if (!visible(pad.x + pad.w / 2, pad.y + pad.h / 2, Math.max(pad.w, pad.h))) return;
+    ctx.fillStyle = PALETTE.asphaltLight;
+    ctx.fillRect(pad.x, pad.y, pad.w, pad.h);
+    ctx.fillStyle = PALETTE.asphaltWorn;
+    for (let x = pad.x + 24; x < pad.x + pad.w - 20; x += 92) {
+      if (jitter(lot.seed + x) < 0.5) ctx.fillRect(x, pad.y + pad.h * 0.42, 46, pad.h * 0.16);
+    }
+    ctx.strokeStyle = 'rgba(232,210,122,0.5)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([16, 14]);
+    ctx.beginPath();
+    ctx.moveTo(pad.x + 10, pad.y + pad.h / 2);
+    ctx.lineTo(pad.x + pad.w - 10, pad.y + pad.h / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Bay ticks along both standing rows.
+    ctx.strokeStyle = 'rgba(240,238,230,0.55)';
+    for (const rowY of [pad.y + 34, pad.y + pad.h - 34]) {
+      for (let x = pad.x + 12; x < pad.x + pad.w - 12; x += 48) {
+        ctx.beginPath();
+        ctx.moveTo(x, rowY - 30);
+        ctx.lineTo(x, rowY + 30);
+        ctx.stroke();
+      }
+    }
+    for (const body of lot.cars) {
+      drawCar({ length: 62, width: 31, speed: 0, smoke: 0, hitFlash: 0, wheelTurn: 0, kind: 'parked', ...body }, 0);
+    }
   }
 
   // ------------------------------------------------------------------ cars
@@ -378,6 +498,7 @@ export function createRenderer(canvas) {
    */
   function drawCar(car, time) {
     if (!visible(car.x, car.y, 120)) return;
+    if (car.kind === 'police') paintSirenGlow(car, time);
     ctx.save();
     ctx.translate(car.x, car.y);
     ctx.rotate(car.angle);
@@ -425,6 +546,17 @@ export function createRenderer(canvas) {
     ctx.fillRect(-L / 2, W / 2 - 10, 3, 6);
     ctx.restore();
     if (car.smoke > 0.05) paintSmoke(car, time);
+  }
+
+  /** The light a cruiser throws on the asphalt: red one breath, blue the next. */
+  function paintSirenGlow(car, time) {
+    const phase = Math.sin(time * 11 + (car.sirenPhase ?? 0)) > 0;
+    const color = phase ? '255,80,70' : '90,170,255';
+    const glow = ctx.createRadialGradient(car.x, car.y, 6, car.x, car.y, 86);
+    glow.addColorStop(0, `rgba(${color},0.30)`);
+    glow.addColorStop(1, `rgba(${color},0)`);
+    ctx.fillStyle = glow;
+    ctx.fillRect(car.x - 86, car.y - 86, 172, 172);
   }
 
   /** Police paint: white doors, a blue band and a light bar that strobes. */
@@ -658,6 +790,45 @@ export function createRenderer(canvas) {
     void time;
   }
 
+  // ------------------------------------------------------- sunset stars
+  /**
+   * The Sunset Stars still standing: a gold palm-star turning slowly over a soft ring of
+   * light, impossible to mistake for street furniture and worth rolling over.
+   */
+  function drawStars(stars, time) {
+    for (const star of stars ?? []) {
+      if (star.taken || !visible(star.x, star.y, 70)) continue;
+      const spin = time * 1.6 + (star.spin ?? 0);
+      const pulse = 1 + Math.sin(time * 3.4 + (star.spin ?? 0)) * 0.12;
+      const glow = ctx.createRadialGradient(star.x, star.y, 2, star.x, star.y, 40 * pulse);
+      glow.addColorStop(0, 'rgba(255,217,77,0.4)');
+      glow.addColorStop(1, 'rgba(255,217,77,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(star.x - 44, star.y - 44, 88, 88);
+      ctx.save();
+      ctx.translate(star.x, star.y + Math.sin(time * 2.2 + (star.spin ?? 0)) * 3);
+      ctx.rotate(Math.sin(spin) * 0.28);
+      ctx.fillStyle = '#ffd94d';
+      ctx.strokeStyle = '#a8741a';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      const outer = 15 * pulse;
+      const inner = 6.4 * pulse;
+      for (let point = 0; point < 10; point += 1) {
+        const radius = point % 2 === 0 ? outer : inner;
+        const angle = -Math.PI / 2 + point * (Math.PI / 5);
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+        if (point === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   // --------------------------------------------------------------- markers
   /** The mission marker: a pulsing gold beacon with a bobbing label chip. */
   function drawMarker(marker, time, color = PALETTE.gold, labelText = null) {
@@ -756,6 +927,7 @@ export function createRenderer(canvas) {
     drawActor,
     drawPlayer,
     drawEffects,
+    drawStars,
     drawMarker,
     drawObjectiveArrow,
   };
