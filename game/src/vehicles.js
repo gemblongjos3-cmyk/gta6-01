@@ -1,123 +1,209 @@
 // Vehicle factory and city traffic. Every car in Palm Shores — the hero
 // Vespera GT, traffic, parked cars waiting to be borrowed, Shores PD
-// cruisers — is built here from the same low-poly kit of boxes and cylinders,
-// so the whole fleet shares one look and one entity shape.
+// cruisers — is built here. Bodies are extruded side profiles (sloped hood,
+// raked glasshouse, real wheel-arch cutouts), so a car reads as a car from
+// any angle; wheels carry five-spoke alloy faces; paint is clearcoat
+// physical material that picks up the sunset environment.
 
 import * as THREE from 'three';
 import { TRAFFIC_MODELS, TRAFFIC_COLORS } from './config.js';
 import { rngPick, rngRange, clamp } from './random.js';
 import { ROAD_CENTERS } from './city.js';
-import { signTexture, glowTexture } from './textures.js';
+import { signTexture, glowTexture, rimTexture } from './textures.js';
 
-const glassMat = new THREE.MeshStandardMaterial({ color: 0x141c2c, metalness: 0.7, roughness: 0.08, envMapIntensity: 1.6 });
-const tireMat = new THREE.MeshStandardMaterial({ color: 0x0d0d10, roughness: 0.95 });
-const rimMat = new THREE.MeshStandardMaterial({ color: 0xb8c4ce, metalness: 0.8, roughness: 0.35 });
-const chromeMat = new THREE.MeshStandardMaterial({ color: 0xd8dee6, metalness: 0.9, roughness: 0.2 });
+const glassMat = new THREE.MeshStandardMaterial({ color: 0x101a28, metalness: 0.7, roughness: 0.08, envMapIntensity: 1.7 });
+const tireMat = new THREE.MeshStandardMaterial({ color: 0x0c0c0f, roughness: 0.92 });
+const chromeMat = new THREE.MeshStandardMaterial({ color: 0xd8dee6, metalness: 0.9, roughness: 0.22 });
+const trimMat = new THREE.MeshStandardMaterial({ color: 0x14151c, metalness: 0.3, roughness: 0.65 });
 const tailMat = new THREE.MeshStandardMaterial({ color: 0x30060c, emissive: 0xff2233, emissiveIntensity: 2.8 });
-let glowTexShared = null;
+const headMat = new THREE.MeshStandardMaterial({ color: 0x444033, emissive: 0xffe9b0, emissiveIntensity: 2.4 });
+let pdDoorTex = null, glowTexShared = null, rimTexShared = null;
 const glowTex = () => glowTexShared ??= glowTexture();
+
+// ---- profile geometry --------------------------------------------------------
+// A car's side silhouette as an extruded shape: `top` lists the outline from
+// the rear bumper, over the roofline, to the nose; the bottom edge is drawn
+// back with an arch cut over each axle. Shape +x = front of the car.
+function archBottom(L, axles, r = 0.47, y = 0.30) {
+  const pts = [];
+  for (const wx of [...axles].sort((a, b) => b - a)) {
+    pts.push([wx + r, y]);
+    for (let i = 1; i < 6; i++) { const a = (i / 6) * Math.PI; pts.push([wx + r * Math.cos(a), y + r * Math.sin(a)]); }
+    pts.push([wx - r, y]);
+  }
+  pts.push([-L / 2, y]);
+  return pts;
+}
+function profileGeo(top, L, width, axles) {
+  const shape = new THREE.Shape();
+  shape.moveTo(top[0][0], top[0][1]);
+  for (let i = 1; i < top.length; i++) shape.lineTo(top[i][0], top[i][1]);
+  if (axles) for (const [x, y] of archBottom(L, axles)) shape.lineTo(x, y);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: true, bevelThickness: 0.025, bevelSize: 0.025, bevelSegments: 1, curveSegments: 14 });
+  geo.translate(0, 0, -width / 2);
+  geo.rotateY(-Math.PI / 2); // shape +x (the nose) becomes world +z
+  return geo;
+}
+
+// Silhouettes per kind: [width, length, axles, bodyTop, cabinTop|null, cabinWidth scale]
+const PROFILES = {
+  coupe: {
+    W: 1.88, L: 4.35, axles: [1.32, -1.32],
+    body: [[-2.17, 0.82], [-1.50, 0.86], [0.95, 0.82], [1.90, 0.68], [2.17, 0.52], [2.17, 0.30]],
+    cabin: [[-1.45, 0.84], [-0.80, 1.20], [0.15, 1.24], [0.95, 0.84]], cabinW: 0.80,
+  },
+  sedan: {
+    W: 1.86, L: 4.50, axles: [1.40, -1.40],
+    body: [[-2.25, 0.88], [-1.15, 0.90], [1.15, 0.86], [1.95, 0.76], [2.25, 0.58], [2.25, 0.30]],
+    cabin: [[-1.50, 0.88], [-1.00, 1.34], [0.50, 1.36], [1.20, 0.88]], cabinW: 0.82,
+  },
+  hatch: {
+    W: 1.82, L: 3.90, axles: [1.15, -1.15],
+    body: [[-1.95, 0.92], [-0.90, 0.94], [1.10, 0.88], [1.75, 0.74], [1.95, 0.56], [1.95, 0.30]],
+    cabin: [[-1.80, 0.92], [-1.15, 1.38], [0.35, 1.40], [1.05, 0.90]], cabinW: 0.82,
+  },
+  pickup: {
+    W: 1.96, L: 4.90, axles: [1.55, -1.55],
+    body: [[-2.45, 1.02], [-0.55, 1.02], [-0.55, 1.44], [0.75, 1.44], [1.55, 0.95], [2.20, 0.88], [2.45, 0.62], [2.45, 0.32]],
+    cabin: null, cabinW: 0.86,
+  },
+  van: {
+    W: 2.00, L: 4.70, axles: [1.50, -1.50],
+    body: [[-2.35, 1.72], [1.60, 1.72], [2.35, 1.05], [2.35, 0.32]],
+    cabin: null, cabinW: 0.9,
+  },
+};
+PROFILES.taxi = PROFILES.sedan;
+PROFILES.cruiser = PROFILES.sedan;
+
+const geoCache = {};
+function kindGeos(kind) {
+  if (geoCache[kind]) return geoCache[kind];
+  const p = PROFILES[kind] || PROFILES.sedan;
+  const geos = {
+    body: profileGeo(p.body, p.L, p.W, p.axles),
+    cabin: p.cabin ? profileGeo(p.cabin, p.L, p.W * p.cabinW, null) : null,
+    p,
+  };
+  geoCache[kind] = geos;
+  return geos;
+}
+
+// ---- shared small parts -------------------------------------------------------
+const tireGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 18);
+const rimGeo = new THREE.CylinderGeometry(0.205, 0.205, 0.25, 12);
+const rimFaceGeo = new THREE.CircleGeometry(0.2, 20);
+const rimFaceMat = () => new THREE.MeshStandardMaterial({ map: rimTexShared ??= rimTexture(), metalness: 0.6, roughness: 0.35 });
+
+function box(w, h, d, mat, x, y, z, parent) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m;
+}
+function glowSprite(g, color, x, y, z, sx, sy, opacity) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  s.position.set(x, y, z); s.scale.set(sx, sy, 1); g.add(s); return s;
+}
 // A soft pool of coloured light the car throws onto the wet asphalt.
 function underGlow(g, color, w, l, opacity, x = 0) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l),
     new THREE.MeshBasicMaterial({ map: glowTex(), color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
   m.rotation.x = -Math.PI / 2; m.position.set(x, 0.06, 0); m.renderOrder = 2; g.add(m);
 }
-const headMat = new THREE.MeshStandardMaterial({ color: 0x444033, emissive: 0xffe9b0, emissiveIntensity: 2.4 });
-let pdDoorTex = null;
-
-function box(w, h, d, mat, x, y, z, parent) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m;
+function makeWheel(sx) {
+  const pivot = new THREE.Group();
+  const spin = new THREE.Group();
+  const tire = new THREE.Mesh(tireGeo, tireMat); tire.rotation.z = Math.PI / 2; tire.castShadow = true; spin.add(tire);
+  const rim = new THREE.Mesh(rimGeo, chromeMat); rim.rotation.z = Math.PI / 2; spin.add(rim);
+  const face = new THREE.Mesh(rimFaceGeo, rimFaceMat());
+  face.position.x = sx * 0.128; face.rotation.y = sx * Math.PI / 2; spin.add(face);
+  pivot.add(spin);
+  return { pivot, spin };
 }
 
 export function makeCarEntity(scene, { kind = 'sedan', color = 0xffffff, police = false, model = '' } = {}) {
   const g = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color: police ? 0x15151c : color, metalness: 0.45, roughness: 0.16, envMapIntensity: 1.5, emissive: police ? 0x000000 : new THREE.Color(color).multiplyScalar(0.14) });
-  const dims = { coupe: [1.86, 4.35, 0.46], sedan: [1.84, 4.5, 0.6], hatch: [1.8, 3.9, 0.62], pickup: [1.95, 4.9, 0.72], van: [2.0, 4.7, 0.8], taxi: [1.84, 4.5, 0.6], cruiser: [1.9, 4.7, 0.62] }[kind] || [1.84, 4.5, 0.6];
-  const [W, L, bodyH] = dims;
-  box(W, bodyH, L, paint, 0, 0.42 + bodyH / 2, 0, g);                       // body
-  box(W * 0.94, 0.16, L * 0.96, paint, 0, 0.46, 0, g);                      // lower skirt
-  if (kind === 'van') {
-    box(W * 0.96, 1.05, L * 0.86, paint, 0, 1.5, -0.2, g);
-    box(W * 0.9, 0.62, 0.1, glassMat, 0, 1.42, L * 0.24, g);
-  } else if (kind === 'pickup') {
-    box(W * 0.92, 0.55, L * 0.34, glassMat, 0, 1.18, L * 0.22, g);
-    box(W * 0.94, 0.5, L * 0.4, paint, 0, 0.98, -L * 0.28, g);               // bed walls
-    box(W * 0.86, 0.08, L * 0.36, tireMat, 0, 0.78, -L * 0.28, g);          // bed floor
-  } else {
-    const cab = box(W * 0.8, 0.44, L * 0.42, glassMat, 0, 0.92 + bodyH * 0.4, -L * 0.05, g);
-    cab.scale.z = 0.92;
-    box(W * 0.82, 0.06, L * 0.38, paint, 0, 1.17 + bodyH * 0.4, -L * 0.05, g); // roof
-    box(W * 0.97, 0.2, L * 0.16, paint, 0, 0.62, L * 0.42, g);               // nose
-    for (const s of [-1, 1]) { // mirrors on slim stalks
-      box(0.05, 0.04, 0.12, paint, s * (W / 2 + 0.05), 1.04, L * 0.16, g);
-      box(0.05, 0.11, 0.2, glassMat, s * (W / 2 + 0.1), 1.08, L * 0.16, g);
-    }
+  const { body: bodyGeo, cabin: cabinGeo, p } = kindGeos(kind);
+  const { W, L, axles } = p;
+  const paint = new THREE.MeshPhysicalMaterial({
+    color: police ? 0x15151c : color, metalness: 0.25, roughness: 0.3,
+    clearcoat: 1, clearcoatRoughness: 0.12, envMapIntensity: 1.6,
+    emissive: police ? 0x000000 : new THREE.Color(color).multiplyScalar(0.12),
+  });
+  const body = new THREE.Mesh(bodyGeo, paint);
+  body.castShadow = true; body.receiveShadow = true; g.add(body);
+  if (cabinGeo) {
+    const cab = new THREE.Mesh(cabinGeo, glassMat);
+    cab.castShadow = true; g.add(cab);
   }
-  if (kind === 'coupe') { // the Vespera's wing and diffuser
-    box(W * 0.92, 0.07, 0.34, chromeMat, 0, 1.06, -L / 2 + 0.1, g);
-    box(0.08, 0.22, 0.3, paint, -W * 0.32, 0.9, -L / 2 + 0.12, g);
-    box(0.08, 0.22, 0.3, paint, W * 0.32, 0.9, -L / 2 + 0.12, g);
+  if (kind === 'pickup') { // glasshouse band proud of the cab + an open bed behind it
+    box(W + 0.04, 0.4, 1.24, glassMat, 0, 1.23, 0.1, g);
+    box(W * 0.8, 0.08, 1.75, trimMat, 0, 1.0, -1.5, g); // bed floor
+  }
+  if (kind === 'van') { // a glass band around the upper body
+    box(W + 0.05, 0.52, L * 0.6, glassMat, 0, 1.3, -0.15, g);
+  }
+  // nose and tail dressing: splitter, grille, diffuser, slim bumpers
+  box(W * 0.96, 0.07, 0.34, trimMat, 0, 0.31, L / 2 - 0.04, g);
+  box(W * 0.58, 0.15, 0.06, trimMat, 0, 0.55, L / 2 + 0.03, g);
+  box(W * 0.99, 0.15, 0.14, trimMat, 0, 0.4, -L / 2 - 0.02, g);
+  if (kind === 'coupe') { // rear wing on struts, diffuser fins, side skirts
+    const wing = box(W * 0.94, 0.05, 0.32, trimMat, 0, 1.04, -L / 2 + 0.14, g); wing.rotation.x = -0.1;
+    box(0.07, 0.2, 0.26, paint, -W * 0.3, 0.9, -L / 2 + 0.14, g);
+    box(0.07, 0.2, 0.26, paint, W * 0.3, 0.9, -L / 2 + 0.14, g);
+    box(W * 0.8, 0.16, 0.1, trimMat, 0, 0.3, -L / 2 - 0.02, g);
+    for (const fx of [-0.3, 0, 0.3]) box(0.05, 0.13, 0.12, trimMat, fx * W, 0.3, -L / 2 - 0.03, g);
+    for (const s of [-1, 1]) box(0.06, 0.13, L * 0.46, trimMat, s * (W / 2 - 0.01), 0.33, 0, g);
+  }
+  if (kind !== 'van' && kind !== 'pickup') for (const s of [-1, 1]) { // mirrors
+    box(0.05, 0.04, 0.12, paint, s * (W / 2 + 0.04), 1.02, L * 0.16, g);
+    box(0.05, 0.11, 0.2, glassMat, s * (W / 2 + 0.09), 1.06, L * 0.16, g);
   }
   if (kind === 'taxi') {
-    const sign = box(0.72, 0.2, 0.3, new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffd23e, emissiveIntensity: 1.4 }), 0, 1.62, 0, g);
+    const sign = box(0.72, 0.2, 0.3, new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffd23e, emissiveIntensity: 1.4 }), 0, 1.48, 0, g);
     sign.castShadow = false;
   }
   if (police) {
-    const white = new THREE.MeshStandardMaterial({ color: 0xf2f0ea, metalness: 0.4, roughness: 0.4 });
-    box(W + 0.03, bodyH * 0.8, L * 0.34, white, 0, 0.46 + bodyH / 2, 0.1, g);   // white doors band
-    box(W * 0.88, 0.07, L * 0.4, white, 0, 1.3, -L * 0.04, g);                 // white roof
-    box(W * 0.7, 0.3, 0.24, tireMat, 0, 0.52, L / 2 + 0.05, g);                // push bar
+    const white = new THREE.MeshPhysicalMaterial({ color: 0xf2f0ea, metalness: 0.25, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.12, envMapIntensity: 1.4 });
+    box(W + 0.07, 0.52, L * 0.36, white, 0, 0.72, 0.05, g);                    // white doors band
+    box(W * 0.8, 0.06, L * 0.3, white, 0, 1.4, -0.25, g);                      // white roof cap
+    box(W * 0.7, 0.3, 0.24, trimMat, 0, 0.52, L / 2 + 0.08, g);                // push bar
     if (!pdDoorTex) pdDoorTex = signTexture('SHORES PD', '#f2f0ea', '#14202e');
     for (const s of [-1, 1]) {
       const door = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.38), new THREE.MeshBasicMaterial({ map: pdDoorTex }));
-      door.position.set(s * (W / 2 + 0.03), 0.72, 0.1); door.rotation.y = s * Math.PI / 2; g.add(door);
+      door.position.set(s * (W / 2 + 0.055), 0.72, 0.05); door.rotation.y = s * Math.PI / 2; g.add(door);
     }
     const bar = new THREE.Group();
     const red = new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2038, emissiveIntensity: 3 });
     const blue = new THREE.MeshStandardMaterial({ color: 0x000022, emissive: 0x2255ff, emissiveIntensity: 3 });
     box(0.55, 0.14, 0.3, red, -0.3, 0, 0, bar); box(0.55, 0.14, 0.3, blue, 0.3, 0, 0, bar);
-    bar.position.set(0, 1.66, -L * 0.04); g.add(bar);
+    bar.position.set(0, 1.56, -0.25); g.add(bar);
     g.userData.lightbar = { red, blue };
-    // strobe halos + the red/blue wash the bar throws on the wet road
     for (const [sx, col] of [[-0.32, 0xff2038], [0.32, 0x2255ff]]) {
-      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: col, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-      halo.position.set(sx, 1.7, -L * 0.04); halo.scale.setScalar(2.6); g.add(halo);
+      glowSprite(g, col, sx, 1.6, -0.25, 2.6, 2.6, 0.5);
       underGlow(g, col, 1.9, L * 1.35, 0.30, sx * 2.4);
     }
   }
-  if (kind === 'coupe' && !police) underGlow(g, color, 3.4, L * 1.3, 0.30); // the Vespera's pink sheen on the asphalt
-  // bumpers, front and rear
-  box(W * 0.99, 0.17, 0.16, chromeMat, 0, 0.4, L / 2 + 0.03, g);
-  box(W * 0.99, 0.17, 0.16, chromeMat, 0, 0.4, -L / 2 - 0.03, g);
+  if (kind === 'coupe' && !police) underGlow(g, color, 3.4, L * 1.3, 0.30);
   // lights, with additive halos so they bloom against the dusk
-  box(0.34, 0.12, 0.06, headMat, -W * 0.3, 0.72, L / 2 + 0.01, g);
-  box(0.34, 0.12, 0.06, headMat, W * 0.3, 0.72, L / 2 + 0.01, g);
-  box(0.36, 0.1, 0.06, tailMat, -W * 0.3, 0.78, -L / 2 - 0.01, g);
-  box(0.36, 0.1, 0.06, tailMat, W * 0.3, 0.78, -L / 2 - 0.01, g);
-  if (kind === 'coupe') box(W * 0.62, 0.07, 0.05, tailMat, 0, 0.82, -L / 2 - 0.01, g); // full-width light bar
-  for (const s of [-1, 1]) {
-    const hg = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: 0xffe9b0, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    hg.position.set(s * W * 0.3, 0.72, L / 2 + 0.15); hg.scale.setScalar(1.15); g.add(hg);
-  }
-  const tg = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: 0xff2233, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-  tg.position.set(0, 0.78, -L / 2 - 0.15); tg.scale.set(2.1, 0.75, 1); g.add(tg);
+  box(0.36, 0.11, 0.06, headMat, -W * 0.3, 0.66, L / 2 + 0.02, g);
+  box(0.36, 0.11, 0.06, headMat, W * 0.3, 0.66, L / 2 + 0.02, g);
+  box(0.36, 0.1, 0.06, tailMat, -W * 0.3, 0.8, -L / 2 - 0.02, g);
+  box(0.36, 0.1, 0.06, tailMat, W * 0.3, 0.8, -L / 2 - 0.02, g);
+  if (kind === 'coupe') box(W * 0.66, 0.07, 0.05, tailMat, 0, 0.84, -L / 2 - 0.02, g); // full-width light bar
+  for (const s of [-1, 1]) glowSprite(g, 0xffe9b0, s * W * 0.3, 0.66, L / 2 + 0.16, 1.15, 1.15, 0.5);
+  glowSprite(g, 0xff2233, 0, 0.8, -L / 2 - 0.16, 2.1, 0.75, 0.42);
   if (kind === 'coupe') for (const s of [-1, 1]) { // twin exhausts
     const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.2, 8), chromeMat);
     ex.rotation.x = Math.PI / 2; ex.position.set(s * 0.52, 0.3, -L / 2 - 0.06); g.add(ex);
   }
   // wheels on steering pivots at the front
-  const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 12);
   const wheels = [], pivots = [];
-  for (const [sx, sz, front] of [[-1, 1, 1], [1, 1, 1], [-1, -1, 0], [1, -1, 0]]) {
-    const pivot = new THREE.Group();
-    pivot.position.set(sx * (W / 2 - 0.05), 0.34, sz * (L / 2 - 0.85));
-    const wheel = new THREE.Mesh(wheelGeo, tireMat);
-    wheel.rotation.z = Math.PI / 2; wheel.castShadow = true;
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.26, 8), rimMat);
-    rim.rotation.z = Math.PI / 2; wheel.add(rim);
-    pivot.add(wheel); g.add(pivot);
-    wheels.push(wheel); if (front) pivots.push(pivot);
+  for (const [sx, front] of [[-1, 1], [1, 1], [-1, 0], [1, 0]]) {
+    const { pivot, spin } = makeWheel(sx);
+    pivot.position.set(sx * (W / 2 - 0.05), 0.34, front ? axles[0] : axles[1]);
+    g.add(pivot);
+    wheels.push(spin); if (front) pivots.push(pivot);
   }
   scene.add(g);
   const ent = {

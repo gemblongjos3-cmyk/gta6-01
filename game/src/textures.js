@@ -263,6 +263,23 @@ export function sunsetEnvTexture() {
   return t;
 }
 
+// A five-spoke alloy wheel face, drawn once and reused on every car.
+export function rimTexture() {
+  const c = canvas(128, 128), g = c.getContext('2d');
+  g.fillStyle = '#101014'; g.beginPath(); g.arc(64, 64, 63, 0, 7); g.fill();
+  g.fillStyle = '#23232c'; g.beginPath(); g.arc(64, 64, 58, 0, 7); g.fill();
+  g.strokeStyle = '#c8d2dc'; g.lineWidth = 11; g.lineCap = 'round';
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+    g.beginPath(); g.moveTo(64, 64); g.lineTo(64 + Math.cos(a) * 44, 64 + Math.sin(a) * 44); g.stroke();
+  }
+  g.fillStyle = '#e8eef4'; g.beginPath(); g.arc(64, 64, 15, 0, 7); g.fill();
+  g.fillStyle = '#3a3f47'; g.beginPath(); g.arc(64, 64, 7, 0, 7); g.fill();
+  g.strokeStyle = '#9aa6b2'; g.lineWidth = 4; g.beginPath(); g.arc(64, 64, 55, 0, 7); g.stroke();
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
 // A vertical neon sign, letters stacked down a dark blade — hotel, marina,
 // club names along Sunset Avenue, all original Palm Shores businesses.
 export function neonSignTexture(text, fg) {
