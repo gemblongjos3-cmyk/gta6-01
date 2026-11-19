@@ -25,8 +25,8 @@ function palmCrownGeometry(leafTex) {
   for (let f = 0; f < 8; f++) {
     const a = (f / 8) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
     const px = -sa, pz = ca, base = f * 4;
-    const tipX = ca * 3.1, tipZ = sa * 3.1;
-    pos.push(-px * 0.06, 0, -pz * 0.06, px * 0.06, 0, pz * 0.06, tipX - px * 0.3, -1.0, tipZ - pz * 0.3, tipX + px * 0.3, -1.0, tipZ + pz * 0.3);
+    const tipX = ca * 3.9, tipZ = sa * 3.9;
+    pos.push(-px * 0.06, 0, -pz * 0.06, px * 0.06, 0, pz * 0.06, tipX - px * 0.3, -1.3, tipZ - pz * 0.3, tipX + px * 0.3, -1.3, tipZ + pz * 0.3);
     uv.push(0, 0, 1, 0, 0.08, 1, 0.92, 1);
     idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
   }
@@ -48,6 +48,7 @@ export function buildWorld(scene, rng) {
 
   // ---- sky, light and air -------------------------------------------------
   scene.fog = new THREE.Fog(0xc64b74, 90, 460);
+  scene.environment = TX.sunsetEnvTexture(); // the sunset every glossy surface reflects
   const sky = new THREE.Mesh(new THREE.SphereGeometry(880, 24, 16),
     new THREE.MeshBasicMaterial({ map: TX.skyTexture(), side: THREE.BackSide, fog: false }));
   scene.add(sky);
@@ -60,6 +61,9 @@ export function buildWorld(scene, rng) {
   const sunHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff7a9c, transparent: true, opacity: 0.3, fog: false, depthWrite: false }));
   sunHalo.position.copy(sunSprite.position); sunHalo.scale.setScalar(620); scene.add(sunHalo);
   scene.add(sunCore);
+  // horizontal glare streak through the sun — the lens flare of the reference shot
+  const flare = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffb37a, transparent: true, opacity: 0.5, fog: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+  flare.position.copy(sunSprite.position); flare.scale.set(620, 46, 1); scene.add(flare);
   scene.add(new THREE.HemisphereLight(0xffc79a, 0x4a2a63, 1.35));
   // warm sky bounce from the east, so faces turned from the sun still read
   const bounce = new THREE.DirectionalLight(0xff8a66, 0.55);
@@ -97,7 +101,7 @@ export function buildWorld(scene, rng) {
   const base = new THREE.Mesh(new THREE.PlaneGeometry(1500, 1500), new THREE.MeshStandardMaterial({ color: 0x241a30, roughness: 1 }));
   base.rotation.x = -Math.PI / 2; base.position.y = -0.05; base.receiveShadow = true; scene.add(base);
   const roadTex = TX.roadTexture();
-  const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.38, metalness: 0.55 });
+  const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.18, metalness: 0.7, envMapIntensity: 1.4 });
   const cwMat = new THREE.MeshStandardMaterial({ map: TX.crosswalkTexture(), roughness: 0.7 });
   const span = P * 7 + CITY.road;
   for (const c of ROAD_CENTERS) {
@@ -281,6 +285,11 @@ export function buildWorld(scene, rng) {
   }
   for (let s = -190; s <= 190; s += 24) palmSpots.push({ x: 230, z: s });
   for (let k = -3; k < 3; k++) palmSpots.push({ x: k * P + P / 2, z: 0, median: true });
+  // Sunset Avenue gets a dense double row, big crowns leaning over the lanes
+  for (let s = -204; s <= 204; s += 17) {
+    palmSpots.push({ x: s, z: -12.8, big: true });
+    palmSpots.push({ x: s + 8, z: 12.8, big: true });
+  }
   const trunkGeo = new THREE.CylinderGeometry(0.13, 0.24, 6.4, 6);
   trunkGeo.translate(0, 3.2, 0);
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a5a40, roughness: 1 });
@@ -289,7 +298,7 @@ export function buildWorld(scene, rng) {
   const crowns = new THREE.InstancedMesh(palmCrownGeometry(), crownMat, palmSpots.length);
   const dummy = new THREE.Object3D();
   palmSpots.forEach((p, i) => {
-    const lean = rngRange(rng, -0.09, 0.09), h = p.median ? 0.85 : rngRange(rng, 0.85, 1.2);
+    const lean = rngRange(rng, -0.09, 0.09), h = p.big ? rngRange(rng, 1.25, 1.55) : p.median ? 1.05 : rngRange(rng, 0.95, 1.3);
     dummy.position.set(p.x, 0, p.z);
     dummy.rotation.set(lean, rng() * Math.PI * 2, lean * 0.7);
     dummy.scale.setScalar(h); dummy.updateMatrix();
@@ -314,6 +323,35 @@ export function buildWorld(scene, rng) {
     dummy.position.y = 5.65; dummy.updateMatrix(); bulbs.setMatrixAt(i, dummy.matrix);
   });
   scene.add(lamps); scene.add(bulbs);
+
+  // ---- Sunset Avenue dressing: lamp halos and neon blade signs -------------
+  const lampGlowTex = TX.glowTexture('rgba(255,214,150,1)', 'rgba(255,160,60,0)');
+  for (const p of lampSpots) {
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, color: 0xffc46b, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.position.set(p.x, 5.65, p.z); halo.scale.setScalar(3.4); scene.add(halo);
+  }
+  const NEON_SIGNS = [
+    { x: -166, z: -13.4, text: 'HOTEL', color: '#ff4fa3', hex: 0xff4fa3 },
+    { x: -76, z: 13.4, text: 'SOLANA', color: '#22d3ee', hex: 0x22d3ee },
+    { x: 14, z: -13.4, text: 'MARINA', color: '#ffd23e', hex: 0xffd23e },
+    { x: 92, z: 13.4, text: 'BAHIA', color: '#7dff6a', hex: 0x7dff6a },
+    { x: 154, z: -13.4, text: 'CLUB', color: '#ff8c42', hex: 0xff8c42 },
+    { x: 202, z: 13.4, text: 'NEON', color: '#e0527a', hex: 0xe0527a },
+  ];
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x1c1428, roughness: 0.8 });
+  for (const s of NEON_SIGNS) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 8.4, 6), poleMat);
+    pole.position.set(s.x, 4.2, s.z); scene.add(pole);
+    const blade = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 5.2),
+      new THREE.MeshBasicMaterial({ map: TX.neonSignTexture(s.text, s.color), side: THREE.DoubleSide }));
+    blade.position.set(s.x, 5.6, s.z); blade.rotation.y = s.z < 0 ? 0 : Math.PI; scene.add(blade);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, color: s.hex, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.position.set(s.x, 5.6, s.z); halo.scale.set(6, 9, 1); scene.add(halo);
+    // the sign's colour bleeding onto the wet asphalt below
+    const bleed = new THREE.Mesh(new THREE.PlaneGeometry(5, 11),
+      new THREE.MeshBasicMaterial({ map: lampGlowTex, color: s.hex, transparent: true, opacity: 0.20, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    bleed.rotation.x = -Math.PI / 2; bleed.position.set(s.x, 0.05, s.z * 0.55); bleed.renderOrder = 2; scene.add(bleed);
+  }
 
   // beach umbrellas on Coral Strand, like the ones in every holiday photo
   const umbMat = new THREE.MeshStandardMaterial({ color: 0xff5c7a, roughness: 0.8, side: THREE.DoubleSide });

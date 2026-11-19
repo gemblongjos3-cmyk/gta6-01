@@ -7,13 +7,21 @@ import * as THREE from 'three';
 import { TRAFFIC_MODELS, TRAFFIC_COLORS } from './config.js';
 import { rngPick, rngRange, clamp } from './random.js';
 import { ROAD_CENTERS } from './city.js';
-import { signTexture } from './textures.js';
+import { signTexture, glowTexture } from './textures.js';
 
-const glassMat = new THREE.MeshStandardMaterial({ color: 0x141c2c, metalness: 0.7, roughness: 0.15 });
+const glassMat = new THREE.MeshStandardMaterial({ color: 0x141c2c, metalness: 0.7, roughness: 0.08, envMapIntensity: 1.6 });
 const tireMat = new THREE.MeshStandardMaterial({ color: 0x0d0d10, roughness: 0.95 });
 const rimMat = new THREE.MeshStandardMaterial({ color: 0xb8c4ce, metalness: 0.8, roughness: 0.35 });
 const chromeMat = new THREE.MeshStandardMaterial({ color: 0xd8dee6, metalness: 0.9, roughness: 0.2 });
-const tailMat = new THREE.MeshStandardMaterial({ color: 0x30060c, emissive: 0xff2233, emissiveIntensity: 1.6 });
+const tailMat = new THREE.MeshStandardMaterial({ color: 0x30060c, emissive: 0xff2233, emissiveIntensity: 2.8 });
+let glowTexShared = null;
+const glowTex = () => glowTexShared ??= glowTexture();
+// A soft pool of coloured light the car throws onto the wet asphalt.
+function underGlow(g, color, w, l, opacity, x = 0) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l),
+    new THREE.MeshBasicMaterial({ map: glowTex(), color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  m.rotation.x = -Math.PI / 2; m.position.set(x, 0.06, 0); m.renderOrder = 2; g.add(m);
+}
 const headMat = new THREE.MeshStandardMaterial({ color: 0x444033, emissive: 0xffe9b0, emissiveIntensity: 2.4 });
 let pdDoorTex = null;
 
@@ -24,7 +32,7 @@ function box(w, h, d, mat, x, y, z, parent) {
 
 export function makeCarEntity(scene, { kind = 'sedan', color = 0xffffff, police = false, model = '' } = {}) {
   const g = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color: police ? 0x15151c : color, metalness: 0.3, roughness: 0.3, emissive: police ? 0x000000 : new THREE.Color(color).multiplyScalar(0.14) });
+  const paint = new THREE.MeshStandardMaterial({ color: police ? 0x15151c : color, metalness: 0.45, roughness: 0.16, envMapIntensity: 1.5, emissive: police ? 0x000000 : new THREE.Color(color).multiplyScalar(0.14) });
   const dims = { coupe: [1.86, 4.35, 0.46], sedan: [1.84, 4.5, 0.6], hatch: [1.8, 3.9, 0.62], pickup: [1.95, 4.9, 0.72], van: [2.0, 4.7, 0.8], taxi: [1.84, 4.5, 0.6], cruiser: [1.9, 4.7, 0.62] }[kind] || [1.84, 4.5, 0.6];
   const [W, L, bodyH] = dims;
   box(W, bodyH, L, paint, 0, 0.42 + bodyH / 2, 0, g);                       // body
@@ -41,6 +49,10 @@ export function makeCarEntity(scene, { kind = 'sedan', color = 0xffffff, police 
     cab.scale.z = 0.92;
     box(W * 0.82, 0.06, L * 0.38, paint, 0, 1.17 + bodyH * 0.4, -L * 0.05, g); // roof
     box(W * 0.97, 0.2, L * 0.16, paint, 0, 0.62, L * 0.42, g);               // nose
+    for (const s of [-1, 1]) { // mirrors on slim stalks
+      box(0.05, 0.04, 0.12, paint, s * (W / 2 + 0.05), 1.04, L * 0.16, g);
+      box(0.05, 0.11, 0.2, glassMat, s * (W / 2 + 0.1), 1.08, L * 0.16, g);
+    }
   }
   if (kind === 'coupe') { // the Vespera's wing and diffuser
     box(W * 0.92, 0.07, 0.34, chromeMat, 0, 1.06, -L / 2 + 0.1, g);
@@ -67,7 +79,14 @@ export function makeCarEntity(scene, { kind = 'sedan', color = 0xffffff, police 
     box(0.55, 0.14, 0.3, red, -0.3, 0, 0, bar); box(0.55, 0.14, 0.3, blue, 0.3, 0, 0, bar);
     bar.position.set(0, 1.66, -L * 0.04); g.add(bar);
     g.userData.lightbar = { red, blue };
+    // strobe halos + the red/blue wash the bar throws on the wet road
+    for (const [sx, col] of [[-0.32, 0xff2038], [0.32, 0x2255ff]]) {
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: col, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      halo.position.set(sx, 1.7, -L * 0.04); halo.scale.setScalar(2.6); g.add(halo);
+      underGlow(g, col, 1.9, L * 1.35, 0.30, sx * 2.4);
+    }
   }
+  if (kind === 'coupe' && !police) underGlow(g, color, 3.4, L * 1.3, 0.30); // the Vespera's pink sheen on the asphalt
   // lights
   box(0.34, 0.12, 0.06, headMat, -W * 0.3, 0.72, L / 2 + 0.01, g);
   box(0.34, 0.12, 0.06, headMat, W * 0.3, 0.72, L / 2 + 0.01, g);

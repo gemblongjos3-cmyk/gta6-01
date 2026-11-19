@@ -115,8 +115,8 @@ export function stageShot(game, name) {
     game.setInCar(true);
     game.heroCar.setPos(30, 3.4, -Math.PI / 2);
     game.heroCar.speed = 12;
-    game.camera.position.set(68, 6.5, 3);
-    game.camera.lookAt(-60, 1.8, 0);
+    game.camera.position.set(97, 7.5, 2);
+    game.camera.lookAt(-70, 2, 0);
     game.camera.fov = 58; game.camera.updateProjectionMatrix();
     hud.showStart(game.save, game.storyLines);
     document.getElementById('hud').style.display = 'none';

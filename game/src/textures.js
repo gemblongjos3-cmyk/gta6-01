@@ -161,6 +161,49 @@ export function signTexture(text, bg, fg) {
   return t;
 }
 
+// Equirect sunset for scene.environment: every glossy surface in the city —
+// wet asphalt, coupe paint, glass — reflects this sky, so the whole frame
+// picks up the pink/orange neon sheen of the golden hour.
+export function sunsetEnvTexture() {
+  const c = canvas(512, 256), g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0.0, '#241448'); grad.addColorStop(0.38, '#5c2064');
+  grad.addColorStop(0.55, '#c94b74'); grad.addColorStop(0.64, '#ff8a4a');
+  grad.addColorStop(0.70, '#ffc46b'); grad.addColorStop(0.76, '#7a3a56');
+  grad.addColorStop(1.0, '#1c1026');
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 256);
+  // the sun: a hard bright blob low on the horizon
+  const sun = g.createRadialGradient(128, 168, 2, 128, 168, 90);
+  sun.addColorStop(0, 'rgba(255,246,200,1)'); sun.addColorStop(0.25, 'rgba(255,190,90,0.85)');
+  sun.addColorStop(1, 'rgba(255,140,80,0)');
+  g.fillStyle = sun; g.fillRect(0, 60, 512, 216);
+  // neon smears in the lower half — city lights waiting to be reflected
+  const smears = ['#ff4fa3', '#22d3ee', '#ffd23e', '#e0527a', '#7dff6a', '#ff8c42'];
+  for (let i = 0; i < 42; i++) {
+    g.fillStyle = smears[i % smears.length] + '55';
+    const w = 6 + Math.random() * 26;
+    g.fillRect(Math.random() * 512, 176 + Math.random() * 62, w, 2.5 + Math.random() * 4);
+  }
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  return t;
+}
+
+// A vertical neon sign, letters stacked down a dark blade — hotel, marina,
+// club names along Sunset Avenue, all original Palm Shores businesses.
+export function neonSignTexture(text, fg) {
+  const c = canvas(128, 512), g = c.getContext('2d');
+  g.fillStyle = '#120a1e'; g.fillRect(0, 0, 128, 512);
+  g.strokeStyle = fg; g.lineWidth = 4; g.globalAlpha = 0.8; g.strokeRect(8, 8, 112, 496); g.globalAlpha = 1;
+  g.fillStyle = fg; g.font = '800 62px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.shadowColor = fg; g.shadowBlur = 16;
+  const letters = text.split('');
+  const step = Math.min(72, 470 / letters.length);
+  letters.forEach((ch, i) => g.fillText(ch, 64, 46 + i * step));
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
 // Weathered pier deck: plank runs with tar seams, stains and a painted safety line.
 export function pierTexture() {
   const c = canvas(256, 256), g = c.getContext('2d');
