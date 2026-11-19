@@ -1,169 +1,93 @@
-// The player: on foot with WASD and a mouse aim, or behind the wheel of whatever car they last
-// climbed into. Health, money and ammo live here; getting into a car is a theft the police may see;
-// dying or being arrested hands the player back to the street near a landmark.
-import { CRIME, PLAYER, ROAD } from './config.js';
-import { nearestCar, stepCarPhysics } from './vehicles.js';
+// Mara Voss on foot: a low-poly figure with a swinging walk cycle, third-person
+// movement tied to the camera, and the carjacking interaction — walk up to any
+// parked or crawling car, press F, and it is yours (its driver may disagree).
 
-export function createPlayer(world) {
-  const player = {
-    x: 0,
-    y: 0,
-    angle: 0,
-    aim: 0,
-    walking: false,
-    running: false,
-    health: PLAYER.health,
-    money: 250,
-    ammo: PLAYER.magazine,
-    reserve: PLAYER.maxAmmo,
-    magazineSize: PLAYER.magazine,
-    reloading: 0,
-    fireCooldown: 0,
-    car: null,
-    kills: 0,
-    walkPhase: 0,
-    hurtFlash: 0,
-    footstep: 0,
-  };
+import * as THREE from 'three';
+import { clamp, dist2d } from './random.js';
 
-  /** Put the player on the pavement outside the diner, on foot and whole. */
-  function spawnAt(x, y) {
-    const diner = world.place('diner');
-    player.x = x ?? diner.door.x;
-    player.y = y ?? diner.door.y;
-    player.health = PLAYER.health;
-    player.car = null;
-    player.walking = true;
-    player.aim = -Math.PI / 2;
-    player.hurtFlash = 0;
+export function createPlayer(scene) {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: 0xf2b183, roughness: 0.7 });
+  const hair = new THREE.MeshStandardMaterial({ color: 0x20131f, roughness: 0.85 });
+  const jacket = new THREE.MeshStandardMaterial({ color: 0x0f766e, roughness: 0.8 });
+  const pants = new THREE.MeshStandardMaterial({ color: 0x23202e, roughness: 0.9 });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.62, 0.24), jacket);
+  torso.position.y = 1.12; torso.castShadow = true; g.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.26), skin);
+  head.position.y = 1.62; head.castShadow = true; g.add(head);
+  const hairTop = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.12, 0.29), hair);
+  hairTop.position.y = 1.78; g.add(hairTop);
+  const ponytail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.1), hair);
+  ponytail.position.set(0, 1.55, -0.17); ponytail.rotation.x = 0.25; g.add(ponytail);
+  const limbs = {};
+  for (const [name, x, y, mat, h] of [
+    ['armL', -0.31, 1.18, jacket, 0.58], ['armR', 0.31, 1.18, jacket, 0.58],
+    ['legL', -0.12, 0.5, pants, 0.78], ['legR', 0.12, 0.5, pants, 0.78]]) {
+    const pivot = new THREE.Group(); pivot.position.set(x, name.startsWith('leg') ? 0.86 : 1.4, 0);
+    const limb = new THREE.Mesh(new THREE.BoxGeometry(0.13, h, 0.15), mat);
+    limb.position.y = -h / 2; limb.castShadow = true; pivot.add(limb); g.add(pivot);
+    limbs[name] = pivot;
   }
-
-  /** Walk (or ride) for one fixed step. Returns what the body did, for other systems to read. */
-  function update(dt, input, aimPoint) {
-    player.hurtFlash = Math.max(0, player.hurtFlash - dt);
-    player.fireCooldown = Math.max(0, player.fireCooldown - dt);
-    if (player.reloading > 0) {
-      player.reloading -= dt;
-      if (player.reloading <= 0) {
-        const need = player.magazineSize - player.ammo;
-        const load = Math.min(need, player.reserve);
-        player.ammo += load;
-        player.reserve -= load;
-      }
-    }
-
-    if (player.car) return updateInCar(dt, input);
-
-    const axis = input.axis();
-    const length = Math.hypot(axis.x, axis.y) || 1;
-    player.running = input.running();
-    player.walking = axis.x !== 0 || axis.y !== 0;
-    const speed = (player.running ? PLAYER.runSpeed : PLAYER.walkSpeed) * (player.reloading > 0 ? 0.6 : 1);
-    const before = { x: player.x, y: player.y };
-    const body = {
-      x: player.x + (axis.x / length) * speed * dt * (player.walking ? 1 : 0),
-      y: player.y + (axis.y / length) * speed * dt * (player.walking ? 1 : 0),
-    };
-    world.resolveCircle(body, PLAYER.radius);
-    player.x = Math.max(16, Math.min(world.width - 16, body.x));
-    player.y = Math.max(16, Math.min(world.height - 16, body.y));
-    player.aim = Math.atan2(aimPoint.y - player.y, aimPoint.x - player.x);
-    player.angle = player.walking ? Math.atan2(axis.y, axis.x) : player.aim;
-    player.walkPhase += speed * dt * 0.09;
-    const distance = Math.hypot(player.x - before.x, player.y - before.y);
-    player.footstep += distance;
-    return { x: player.x, y: player.y, distance, driving: false };
-  }
-
-  function updateInCar(dt, input) {
-    const car = player.car;
-    const axis = input.axis();
-    // W drives, S reverses (then brakes), A and D steer; Shift is the handbrake.
-    const throttle = axis.y < 0 ? Math.min(1, car.speed / car.maxSpeed + 0.55) : 0;
-    const brakeInput = axis.y > 0 ? (car.speed > 4 ? 0.8 : 1) : 0;
-    const steer = axis.x * 1.4;
-    stepCarPhysics(car, dt, { throttle, brake: brakeInput, steer }, world);
-    player.x = car.x;
-    player.y = car.y;
-    player.aim = Math.atan2(input.pointer.worldY - car.y, input.pointer.worldX - car.x);
-    return {
-      x: car.x,
-      y: car.y,
-      distance: Math.abs(car.speed) * dt,
-      driving: true,
-      speed: car.speed,
-      crashed: car.hitFlash > 0.3,
-    };
-  }
-
-  /** Climb into `car`; if a traffic driver is in it, they bail out and the police hear about it. */
-  function enterCar(car, opts = {}) {
-    const wasOccupied = car.kind === 'traffic' || car.kind === 'parked' || car.kind === 'police';
-    car.driver = 'player';
-    player.car = car;
-    player.walking = false;
-    car.speed = Math.min(car.speed, 60);
-    return {
-      stolen: wasOccupied,
-      /** A traffic car's driver leaves the street and runs. */
-      ejectedDriver: wasOccupied ? { x: car.x + Math.cos(car.angle + Math.PI) * 24, y: car.y + Math.sin(car.angle + Math.PI) * 24 } : null,
-      crime: wasOccupied ? CRIME.stealCar : 0,
-    };
-  }
-
-  /** Step out beside the car, clear of its body. */
-  function exitCar() {
-    const car = player.car;
-    if (!car) return null;
-    const side = { x: car.x - Math.sin(car.angle) * (car.width / 2 + 16), y: car.y + Math.cos(car.angle) * (car.width / 2 + 16) };
-    const body = { x: side.x, y: side.y };
-    world.resolveCircle(body, PLAYER.radius + 2);
-    player.x = body.x;
-    player.y = body.y;
-    player.aim = car.angle;
-    player.car = null;
-    car.driver = null;
-    car.speed *= 0.3;
-    return { x: player.x, y: player.y };
-  }
-
-  /** Damage the player; returns true when it was the killing blow. */
-  function hurt(amount) {
-    player.health = Math.max(0, player.health - amount);
-    player.hurtFlash = 0.5;
-    return player.health <= 0;
-  }
-
-  function heal(amount) {
-    player.health = Math.min(PLAYER.health, player.health + amount);
-  }
-
-  function addMoney(amount) {
-    player.money = Math.max(0, player.money + amount);
-  }
-
-  /** The car the player could climb into: the nearest within a few steps. */
-  function carInReach(cars) {
-    if (player.car) return null;
-    return nearestCar(cars, player.x, player.y, ROAD.width / 2 + 10);
-  }
-
-  /** A safe place to come back after an arrest or a wipeout: the nearest hospital or diner. */
-  function respawnPoint(world2) {
-    const hospital = world2.place('hospital');
-    return { x: hospital.door.x, y: hospital.door.y };
-  }
-
+  scene.add(g);
   return {
-    state: player,
-    spawnAt,
-    update,
-    enterCar,
-    exitCar,
-    hurt,
-    heal,
-    addMoney,
-    carInReach,
-    respawnPoint,
+    mesh: g, limbs, heading: 0, walkPhase: 0, aiming: false,
+    setPos(x, z, heading) { g.position.set(x, 0, z); this.heading = heading; g.rotation.y = heading; },
   };
+}
+
+// WASD relative to the camera heading; Shift runs. Returns current speed.
+export function stepOnFoot(player, input, dt, world, camHeading) {
+  let mx = 0, mz = 0;
+  const fx = Math.sin(camHeading), fz = Math.cos(camHeading);
+  const rx = Math.cos(camHeading), rz = -Math.sin(camHeading);
+  if (input.forward) { mx += fx; mz += fz; }
+  if (input.back) { mx -= fx; mz -= fz; }
+  if (input.right) { mx += rx; mz += rz; }
+  if (input.left) { mx -= rx; mz -= rz; }
+  const len = Math.hypot(mx, mz);
+  const speed = input.run ? 7.4 : 4.6;
+  if (len > 0.01) {
+    mx /= len; mz /= len;
+    const p = player.mesh.position;
+    const fixed = world.collide(p.x + mx * speed * dt, p.z + mz * speed * dt, 0.45);
+    p.x = fixed.x; p.z = fixed.z;
+    if (!player.aiming) player.heading = Math.atan2(mx, mz);
+    player.walkPhase += dt * (input.run ? 11 : 8);
+  } else {
+    player.walkPhase *= 0.8;
+  }
+  player.mesh.rotation.y = player.heading;
+  const swing = Math.sin(player.walkPhase) * (len > 0.01 ? 0.55 : 0);
+  player.limbs.legL.rotation.x = swing; player.limbs.legR.rotation.x = -swing;
+  if (player.aiming) {
+    player.limbs.armR.rotation.x = -1.35; player.limbs.armL.rotation.x = -1.1;
+  } else {
+    player.limbs.armL.rotation.x = -swing * 0.8; player.limbs.armR.rotation.x = swing * 0.8;
+  }
+  return len > 0.01 ? speed : 0;
+}
+
+// The closest car Mara can take or enter, and what the prompt should say.
+export function nearestCar(player, cars, ownCar) {
+  const p = player.mesh.position;
+  let best = null, bd = 3.4;
+  for (const car of cars) {
+    if (car.dead || !car.mesh) continue;
+    const d = dist2d(p.x, p.z, car.mesh.position.x, car.mesh.position.z);
+    if (d < bd) { bd = d; best = car; }
+  }
+  if (ownCar && !ownCar.dead) {
+    const d = dist2d(p.x, p.z, ownCar.mesh.position.x, ownCar.mesh.position.z);
+    if (d < bd) { bd = d; best = ownCar; }
+  }
+  if (!best) return null;
+  const label = best === ownCar ? `F — GET IN THE ${best.model}` :
+    best.driver === 'parked' ? `F — TAKE THE ${best.model}` :
+    `F — PULL THE DRIVER OUT OF THE ${best.model}`;
+  return { car: best, label, isOwn: best === ownCar };
+}
+
+export function clampToCity(player) {
+  const p = player.mesh.position;
+  p.x = clamp(p.x, -232, 336); p.z = clamp(p.z, -232, 232);
 }

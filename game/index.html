@@ -3,384 +3,238 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Palm Shores</title>
+<title>Palm Shores — an open-world crime game</title>
 <style>
-  :root {
-    --ink: #fff4e4;
-    --muted: #cfb9a4;
-    --gold: #ffc94d;
-    --danger: #ff5b5b;
-    --panel: rgba(24, 16, 34, 0.78);
-    --panel-edge: rgba(255, 201, 120, 0.35);
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #16101f; font-family: var(--font); }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  #hud { position: fixed; inset: 0; pointer-events: none; color: var(--ink); }
-
-  #wanted { position: absolute; top: 18px; left: 22px; display: flex; gap: 5px; }
-  #wanted .star {
-    width: 26px; height: 26px; display: block;
-    background: radial-gradient(circle at 50% 42%, #ffd76b 0 38%, #c98a2c 70%, transparent 72%);
-    clip-path: polygon(50% 0%, 63% 35%, 100% 38%, 71% 61%, 81% 98%, 50% 76%, 19% 98%, 29% 61%, 0% 38%, 37% 35%);
-    opacity: 0.18; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
-  }
-  #wanted .star.lit { opacity: 1; }
-
-  #cash { position: absolute; top: 16px; right: 24px; text-align: right; }
-  #cash .amount { font-size: 34px; font-weight: 800; color: #b9f0a6; letter-spacing: 0.5px; text-shadow: 0 3px 10px rgba(0,0,0,0.6); }
-  #cash .label { font-size: 11px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
-
-  #vitals { position: absolute; top: 66px; right: 24px; width: 210px; }
-  #vitals .row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-  #vitals .tag { font-size: 10px; letter-spacing: 2px; color: var(--muted); width: 46px; text-transform: uppercase; }
-  .bar { flex: 1; height: 9px; background: rgba(10, 6, 16, 0.65); border: 1px solid rgba(255, 244, 228, 0.18); border-radius: 5px; overflow: hidden; }
-  .bar > i { display: block; height: 100%; width: 100%; border-radius: 4px; transition: width 0.18s linear; }
-  #healthBar > i { background: linear-gradient(90deg, #6fdc6f, #a8ef8c); }
-  #healthBar.low > i { background: linear-gradient(90deg, #ff4f4f, #ff9a5a); }
-
-  #objective {
-    position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
-    min-width: 380px; max-width: 560px; padding: 10px 22px 12px;
-    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 12px;
-    text-align: center; backdrop-filter: blur(3px); opacity: 0;
-  }
-  #objective .title { font-size: 11px; letter-spacing: 3.5px; text-transform: uppercase; color: var(--gold); }
-  #objective .text { font-size: 17px; font-weight: 600; margin-top: 3px; }
-  #objective .timer { font-size: 22px; font-weight: 800; color: #ffd27a; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  #objective .timer.late { color: var(--danger); }
-
-  #missionTag {
-    position: absolute; left: 22px; bottom: 232px; font-size: 12px; letter-spacing: 2.5px;
-    text-transform: uppercase; color: var(--gold); opacity: 0;
-  }
-
-  /* The left rail: mission dossier, Shores PD response and Luna's dispatch
-     strip stacked under the wanted stars. It replaces the top-centre
-     objective card during play; the card and tag stay in the DOM, hidden. */
-  #rail {
-    position: absolute; left: 22px; top: 56px; width: 300px;
-    display: flex; flex-direction: column; gap: 8px;
-  }
-  .railCard {
-    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 12px;
-    padding: 10px 14px 11px; backdrop-filter: blur(3px); opacity: 0;
-  }
-  #dossier .head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-  #dossier .head .name { font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--gold); font-weight: 700; }
-  #dossier .head .timer { font-size: 19px; font-weight: 800; color: #ffd27a; font-variant-numeric: tabular-nums; }
-  #dossier .head .timer.late { color: var(--danger); }
-  #dossier .obj { font-size: 14.5px; font-weight: 600; margin-top: 3px; line-height: 1.35; }
-  #dossier .sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.3; }
-  #dossier .stageRow { display: flex; align-items: center; gap: 9px; margin-top: 9px; }
-  #dossierStageLabel { font-size: 10px; letter-spacing: 2px; color: var(--gold); font-weight: 700; white-space: nowrap; }
-  #dossier .stage { display: flex; gap: 4px; flex: 1; }
-  #dossier .stage i { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 244, 228, 0.16); }
-  #dossier .stage i.done { background: linear-gradient(90deg, #ffc94d, #ff9d5c); }
-  #dossier .stage i.now { background: linear-gradient(90deg, #ffc94d 50%, rgba(255, 244, 228, 0.16) 50%); }
-  #dossier .next { font-size: 11.5px; color: var(--muted); margin-top: 8px; letter-spacing: 0.4px; }
-  #dossier .next b { color: var(--ink); font-weight: 600; }
-  #dossier .district { font-size: 10.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); margin-top: 5px; }
-
-  #pdPanel .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  #pdPanel .head .name { font-size: 11px; letter-spacing: 2px; color: #8ec9ff; font-weight: 700; }
-  .chip {
-    font-size: 9.5px; font-weight: 700; letter-spacing: 1.5px; padding: 2px 8px; border-radius: 999px;
-    white-space: nowrap;
-  }
-  .chip.sight { background: rgba(255, 91, 91, 0.18); color: #ff9a8a; border: 1px solid rgba(255, 91, 91, 0.55); }
-  .chip.evade { background: rgba(63, 224, 208, 0.12); color: #7fe8dc; border: 1px solid rgba(63, 224, 208, 0.45); }
-  #pdRows .row { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 12.5px; }
-  #pdRows .unit { font-weight: 700; letter-spacing: 1px; flex: 1; }
-  #pdRows .dist { color: var(--muted); font-variant-numeric: tabular-nums; }
-  #pdRows .chip.pursuit { background: rgba(255, 91, 91, 0.18); color: #ff9a8a; border: 1px solid rgba(255, 91, 91, 0.5); }
-  #pdRows .chip.intercept { background: rgba(255, 170, 60, 0.16); color: #ffc46a; border: 1px solid rgba(255, 170, 60, 0.5); }
-  #pdRows .chip.roadblock { background: rgba(176, 132, 255, 0.16); color: #cdaaff; border: 1px solid rgba(176, 132, 255, 0.5); }
-  #pdRows .chip.closing { background: rgba(255, 201, 77, 0.13); color: #ffd27a; border: 1px solid rgba(255, 201, 77, 0.45); }
-  #pdRows .chip.patrol { background: rgba(160, 175, 190, 0.12); color: #b9c6d2; border: 1px solid rgba(160, 175, 190, 0.4); }
-  #pdRows .chip.ramming { background: rgba(255, 91, 91, 0.22); color: #ffb0a0; border: 1px solid rgba(255, 91, 91, 0.65); }
-  #pdRows .chip.air { background: rgba(95, 178, 255, 0.16); color: #a8d8ff; border: 1px solid rgba(95, 178, 255, 0.5); }
-  #pdFoot { font-size: 11px; color: var(--muted); margin-top: 8px; letter-spacing: 0.4px; }
-
-  #progress { position: absolute; left: 20px; bottom: 234px; width: 200px; opacity: 0; }
-  #progress .prow { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
-  #progress .plabel { font-size: 10px; letter-spacing: 1.6px; color: var(--ink); width: 86px; font-weight: 700; text-shadow: 0 2px 6px rgba(0,0,0,0.7); font-variant-numeric: tabular-nums; }
-  #progress .pbar { flex: 1; height: 7px; background: rgba(10, 6, 16, 0.65); border: 1px solid rgba(255, 244, 228, 0.18); border-radius: 4px; overflow: hidden; }
-  #progress .pbar > i { display: block; height: 100%; border-radius: 3px; }
-  #respectBar > i { background: linear-gradient(90deg, #ff6fa5, #ffb35c); }
-  #xpBar > i { background: linear-gradient(90deg, #ffc94d, #ffe7b0); }
-
-  #weaponSlots { position: absolute; right: 26px; top: 118px; display: flex; gap: 6px; opacity: 0; }
-  #weaponSlots .slot {
-    padding: 5px 9px 6px; border-radius: 8px; text-align: center;
-    background: rgba(24, 16, 34, 0.66); border: 1px solid rgba(255, 244, 228, 0.16);
-  }
-  #weaponSlots .slot .smodel { display: block; font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--ink); }
-  #weaponSlots .slot .stag { display: block; font-size: 8.5px; letter-spacing: 2px; color: var(--muted); margin-top: 1px; }
-  #weaponSlots .slot.active { border-color: rgba(255, 201, 77, 0.75); background: rgba(255, 201, 77, 0.13); }
-  #weaponSlots .slot.active .stag { color: var(--gold); }
-  #weaponSlots .slot.locked { opacity: 0.55; }
-  #weaponSlots .slot.locked .stag { color: #ff9a8a; }
-
-  #wheel {
-    position: absolute; left: 50%; top: 50%; width: 252px; height: 252px;
-    transform: translate(-50%, -50%); border-radius: 50%; opacity: 0;
-    background: radial-gradient(circle, rgba(16, 10, 24, 0.25) 0 34%, rgba(16, 10, 24, 0.78) 62%, rgba(16, 10, 24, 0.88) 100%);
-    border: 1px solid rgba(255, 201, 120, 0.4); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
-  }
-  #wheel .wseg {
-    position: absolute; width: 104px; padding: 8px 6px; border-radius: 10px; text-align: center;
-    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 244, 228, 0.18);
-  }
-  #wheel .wseg.seg0 { left: 50%; top: 12px; transform: translateX(-50%); }
-  #wheel .wseg.seg1 { left: 8px; bottom: 16px; }
-  #wheel .wseg.seg2 { right: 8px; bottom: 16px; }
-  #wheel .wseg .wmodel { font-size: 13px; font-weight: 800; letter-spacing: 1px; }
-  #wheel .wseg .wname { font-size: 9.5px; letter-spacing: 2px; color: var(--muted); margin-top: 2px; text-transform: uppercase; }
-  #wheel .wseg .wammo { font-size: 11px; color: var(--gold); margin-top: 2px; font-variant-numeric: tabular-nums; }
-  #wheel .wseg.picked { border-color: rgba(255, 201, 77, 0.9); background: rgba(255, 201, 77, 0.16); box-shadow: 0 0 22px rgba(255, 201, 77, 0.35); }
-  #wheel .wseg.locked { opacity: 0.5; }
-  #wheel .wseg.locked .wname { color: #ff9a8a; }
-
-  #speedGear { font-size: 16px; font-weight: 800; color: var(--gold); margin-left: 9px; letter-spacing: 1px; }
-  #carCondPct { font-size: 10.5px; letter-spacing: 2px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
-
-  #dialogue { display: flex; gap: 10px; align-items: center; }
-  #dialogue .portrait {
-    flex: 0 0 54px; width: 54px; height: 54px; border-radius: 10px; overflow: hidden;
-    border: 1px solid var(--panel-edge); background: #1d2b33;
-  }
-  #dialogue .portrait svg { display: block; width: 54px; height: 54px; }
-  #dialogue .name { font-size: 10px; letter-spacing: 2.5px; color: var(--gold); font-weight: 700; }
-  #dialogue .text { font-size: 13px; line-height: 1.35; margin-top: 2px; }
-
-  #radarLabel {
-    position: absolute; left: 20px; bottom: 3px; width: 200px; text-align: center;
-    font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--muted);
-  }
-
-  #minimapWrap {
-    position: absolute; left: 20px; bottom: 20px; width: 200px; height: 200px;
-    border-radius: 50%; border: 2px solid rgba(255, 214, 150, 0.55);
-    box-shadow: 0 6px 26px rgba(0, 0, 0, 0.55), inset 0 0 26px rgba(0, 0, 0, 0.6);
-    background: rgba(16, 10, 24, 0.9); overflow: hidden;
-  }
-  #minimap { width: 100%; height: 100%; display: block; }
-  #minimapWrap .ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 24px rgba(0,0,0,0.75); }
-
-  #speedo {
-    position: absolute; right: 26px; bottom: 24px; text-align: right; opacity: 0;
-    padding: 10px 18px; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 12px;
-  }
-  #speedo .value { font-size: 46px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-  #speedo .unit { font-size: 11px; letter-spacing: 3px; color: var(--muted); }
-  #speedo .car { font-size: 11px; letter-spacing: 2px; color: var(--gold); text-transform: uppercase; margin-top: 4px; }
-  #carCond { display: flex; gap: 4px; justify-content: flex-end; margin-top: 7px; }
-  #carCond .seg { display: block; width: 24px; height: 6px; border-radius: 3px; background: rgba(255, 244, 228, 0.16); }
-  #carCond .seg.lit { background: linear-gradient(90deg, #6fdc6f, #a8ef8c); }
-  #carCond.low .seg.lit { background: linear-gradient(90deg, #ff4f4f, #ff9a5a); }
-
-  #radio {
-    position: absolute; right: 26px; bottom: 216px; display: flex; align-items: center; gap: 10px;
-    padding: 7px 14px; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 999px;
-    opacity: 0; white-space: nowrap;
-  }
-  #radio .station { font-size: 10px; letter-spacing: 2px; color: var(--gold); font-weight: 700; }
-  #radio .track { font-size: 12px; letter-spacing: 0.5px; color: var(--ink); }
-  #radio .eq { display: inline-flex; align-items: flex-end; gap: 2.5px; height: 10px; }
-  #radio .eq i { display: block; width: 3px; border-radius: 1px; background: var(--gold); }
-  #radio .eq i:nth-child(1) { height: 5px; }
-  #radio .eq i:nth-child(2) { height: 10px; }
-  #radio .eq i:nth-child(3) { height: 7px; }
-
-  #banner {
-    position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%);
-    text-align: center; opacity: 0; pointer-events: none;
-  }
-  #banner .big { font-size: 64px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 6px 28px rgba(0,0,0,0.7); }
-  #banner .small { font-size: 16px; color: var(--muted); letter-spacing: 4px; text-transform: uppercase; margin-top: 6px; }
-  #banner.busted .big { color: #8ec9ff; }
-  #banner.wasted .big { color: #ff6a5c; }
-
-  #flash { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
-  #flash.blue { background: radial-gradient(circle at 50% 50%, rgba(80, 160, 255, 0.0) 30%, rgba(60, 130, 255, 0.6) 100%); }
-  #flash.red { background: radial-gradient(circle at 50% 50%, rgba(255, 60, 40, 0.0) 20%, rgba(190, 20, 10, 0.75) 100%); }
-
-  #toast {
-    position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%);
-    padding: 8px 20px; border-radius: 999px; background: var(--panel); border: 1px solid var(--panel-edge);
-    font-size: 13px; letter-spacing: 1.5px; color: var(--ink); opacity: 0; white-space: nowrap;
-  }
-
-  #hint {
-    position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%);
-    font-size: 13px; letter-spacing: 1.5px; color: var(--muted); opacity: 0;
-    background: rgba(14, 9, 22, 0.55); padding: 6px 14px; border-radius: 999px;
-  }
-
-  #weapon {
-    position: absolute; right: 26px; bottom: 150px; text-align: right; font-size: 13px;
-    letter-spacing: 2px; color: var(--muted); text-transform: uppercase;
-  }
-  #weapon b { color: var(--ink); font-size: 18px; letter-spacing: 1px; }
-
-  .overlay {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(180deg, rgba(20, 12, 30, 0.42) 0%, rgba(20, 12, 30, 0.72) 100%);
-    pointer-events: none;
-  }
-  #start { opacity: 1; }
-  #pause { opacity: 0; visibility: hidden; background: rgba(14, 8, 22, 0.62); }
-  .panel {
-    position: relative; width: min(760px, 88vw); padding: 34px 42px 30px; border-radius: 20px;
-    background: rgba(22, 14, 32, 0.82); border: 1px solid var(--panel-edge);
-    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55); color: var(--ink);
-  }
-  #start .eyebrow { font-size: 11px; letter-spacing: 6px; color: var(--gold); text-transform: uppercase; }
-  h1#title {
-    margin: 6px 0 2px; font-size: clamp(58px, 9vw, 104px); line-height: 0.92; font-weight: 900;
-    letter-spacing: -1px; background: linear-gradient(180deg, #ffe7b0 0%, #ff9d5c 48%, #e2547c 100%);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-    text-shadow: 0 10px 40px rgba(255, 130, 80, 0.28);
-  }
-  #start .subtitle { font-size: 13px; letter-spacing: 5px; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; }
-  #start .story { font-size: 15.5px; line-height: 1.55; color: #f0e2d2; max-width: 620px; }
-  #start .story em { color: var(--gold); font-style: normal; }
-  .menu { margin: 20px 0 4px; display: flex; flex-direction: column; gap: 7px; }
-  .menu .item {
-    display: flex; align-items: center; gap: 14px; padding: 9px 14px; border-radius: 10px;
-    background: rgba(255, 255, 255, 0.045); border: 1px solid transparent; font-size: 15px;
-  }
-  .menu .item.active { background: rgba(255, 201, 77, 0.13); border-color: rgba(255, 201, 77, 0.5); }
-  .menu .item .key {
-    min-width: 26px; padding: 2px 7px; border-radius: 6px; background: rgba(255, 244, 228, 0.12);
-    font-size: 12px; text-align: center; color: var(--gold); font-weight: 700;
-  }
-  .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 18px; margin-top: 16px; font-size: 13px; color: var(--muted); }
-  .controls b { color: var(--ink); font-weight: 700; }
-  .footer { margin-top: 18px; font-size: 12px; color: rgba(207, 185, 164, 0.75); letter-spacing: 1px; }
-  #pause h2 { margin: 0 0 4px; font-size: 44px; font-weight: 900; letter-spacing: 1px; }
-  #pause .menu { margin-top: 14px; }
-
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #160f24; font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; color: #f5eefc; }
+  #app, #app canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #grade { position: absolute; inset: 0; pointer-events: none; z-index: 3;
+    background: radial-gradient(ellipse at 50% 42%, transparent 55%, rgba(24,6,36,0.42) 100%); }
+  #hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+  .panel { background: rgba(16,10,28,0.78); border: 1px solid rgba(255,120,180,0.35); border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.45); backdrop-filter: blur(3px); }
+  /* mission dossier, top-left */
+  #missionPanel { position: absolute; top: 16px; left: 16px; width: 308px; padding: 10px 12px; }
+  #missionPanel .row1 { display: flex; justify-content: space-between; align-items: baseline; }
+  #mpHead { color: #ffc92e; font-weight: 800; font-size: 13px; letter-spacing: 0.06em; }
+  #mpTimer { color: #fff; font-weight: 800; font-size: 15px; }
+  #mpObjective { font-size: 15.5px; font-weight: 700; line-height: 1.25; margin-top: 4px; }
+  #mpSub { font-size: 11.5px; color: #b8a8d8; margin-top: 3px; }
+  #mpStage { font-size: 11px; color: #ffc92e; font-weight: 700; letter-spacing: 0.08em; margin-top: 7px; }
+  #mpBar { display: flex; gap: 4px; margin-top: 3px; }
+  #mpBar .seg { height: 5px; flex: 1; border-radius: 3px; background: #3a2c52; }
+  #mpBar .seg.done { background: #ffc92e; }
+  #mpBar .seg.now { background: linear-gradient(90deg, #ffc92e, #ff4fa3); }
+  #mpNext { font-size: 11.5px; color: #e8dcff; margin-top: 6px; }
+  #mpDistrict { font-size: 10.5px; color: #ff9ecb; letter-spacing: 0.14em; margin-top: 5px; font-weight: 700; }
+  /* police panel */
+  #pdPanel { position: absolute; top: 196px; left: 16px; width: 308px; padding: 9px 12px; display: none; }
+  #pdPanel .row1 { display: flex; justify-content: space-between; align-items: center; }
+  #pdHead { font-size: 11.5px; font-weight: 800; letter-spacing: 0.05em; color: #a8c8ff; }
+  .sight { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 6px; letter-spacing: 0.08em; }
+  .sight.seen { background: #d92b3a; color: #fff; }
+  .sight.lost { background: #2e9e5b; color: #fff; }
+  .unit { display: flex; align-items: center; gap: 7px; font-size: 12px; margin-top: 5px; }
+  .uname { font-weight: 700; flex: 1; }
+  .udist { color: #b8a8d8; font-size: 11px; }
+  .uchip { font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 5px; letter-spacing: 0.05em; color: #14101f; }
+  .uchip.ramming { background: #ff5c5c; } .uchip.pursuit { background: #ff9f43; }
+  .uchip.intercept { background: #54a0ff; } .uchip.roadblock { background: #ffd23e; }
+  .uchip.airsupport { background: #c56cf0; }
+  #pdFoot { font-size: 10.5px; color: #b8a8d8; margin-top: 6px; }
+  /* top-right cluster */
+  #topRight { position: absolute; top: 14px; right: 16px; text-align: right; }
+  #clockLine { font-size: 12px; letter-spacing: 0.16em; color: #ffd9ec; font-weight: 700; text-shadow: 0 2px 8px #000; }
+  #cash { font-size: 30px; font-weight: 900; color: #57e389; text-shadow: 0 2px 10px rgba(0,0,0,0.7); line-height: 1.05; }
+  #stars { font-size: 21px; letter-spacing: 3px; }
+  #stars .star { color: rgba(255,255,255,0.25); text-shadow: 0 1px 4px #000; }
+  #stars .star.on { color: #ffd23e; text-shadow: 0 0 9px rgba(255,210,62,0.8); }
+  #weaponSlots { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+  .slot { background: rgba(16,10,28,0.78); border: 1px solid rgba(255,255,255,0.25); border-radius: 7px; padding: 4px 8px; min-width: 74px; text-align: center; }
+  .slot.sel { border-color: #ffc92e; box-shadow: 0 0 10px rgba(255,201,46,0.35); }
+  .slot.locked { opacity: 0.45; }
+  .slot .sname { font-size: 11px; font-weight: 800; }
+  .slot .skind { font-size: 9px; color: #b8a8d8; letter-spacing: 0.1em; }
+  #ammoLine { font-size: 11.5px; color: #e8dcff; margin-top: 4px; text-shadow: 0 1px 5px #000; font-weight: 700; }
+  /* bottom-left: minimap + bars */
+  #mapWrap { position: absolute; left: 16px; bottom: 16px; width: 184px; }
+  #minimap { width: 184px; height: 184px; display: block; }
+  #districtChip { text-align: center; font-size: 10.5px; font-weight: 800; letter-spacing: 0.18em; color: #ffd9ec; margin-top: 2px; text-shadow: 0 1px 5px #000; }
+  .barRow { display: flex; align-items: center; gap: 7px; margin-top: 5px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; }
+  .barTrack { flex: 1; height: 7px; background: rgba(10,6,20,0.75); border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,0.2); }
+  .barFill { height: 100%; border-radius: 4px; }
+  #respectFill { background: linear-gradient(90deg, #ff4fa3, #ffc92e); width: 0%; }
+  #xpFill { background: #54c8ff; width: 0%; }
+  #healthFill { background: #57e389; width: 100%; }
+  .barVal { min-width: 62px; text-align: right; color: #e8dcff; }
+  /* dialogue, bottom-centre */
+  #dialogue { position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; width: 470px; max-width: 44vw;
+    display: flex; gap: 10px; padding: 9px 12px; align-items: center; transition: opacity 0.4s; }
+  #dlgPortrait { width: 52px; height: 52px; border-radius: 8px; border: 1px solid rgba(255,201,46,0.6); }
+  #dlgName { font-size: 11px; font-weight: 800; color: #ffc92e; letter-spacing: 0.08em; }
+  #dlgText { font-size: 13.5px; line-height: 1.3; }
+  /* bottom-right: radio + vehicle */
+  #rightStack { position: absolute; right: 16px; bottom: 16px; width: 252px; }
+  #radioPanel { padding: 8px 11px; margin-bottom: 8px; }
+  #radioFreq { font-size: 12px; font-weight: 800; color: #ff9ecb; letter-spacing: 0.05em; }
+  #radioTrack { font-size: 12px; color: #e8dcff; margin-top: 2px; white-space: nowrap; overflow: hidden; }
+  .eq { display: inline-flex; gap: 2px; margin-left: 7px; vertical-align: middle; }
+  .eq i { width: 3px; background: #57e389; display: inline-block; animation: eqb 0.7s infinite alternate; }
+  .eq i:nth-child(2) { animation-delay: 0.15s; } .eq i:nth-child(3) { animation-delay: 0.3s; } .eq i:nth-child(4) { animation-delay: 0.45s; }
+  @keyframes eqb { from { height: 4px; } to { height: 12px; } }
+  #vehPanel { padding: 9px 12px; }
+  #vehName { font-size: 12px; font-weight: 800; letter-spacing: 0.1em; color: #ffd9ec; }
+  .condRow { display: flex; align-items: center; gap: 7px; font-size: 10px; color: #b8a8d8; margin-top: 4px; }
+  #vehCondTrack { flex: 1; height: 6px; background: rgba(255,255,255,0.14); border-radius: 3px; overflow: hidden; }
+  #vehCondFill { height: 100%; background: #57e389; width: 98%; }
+  #nitroTrack { flex: 1; height: 6px; background: rgba(255,255,255,0.14); border-radius: 3px; overflow: hidden; }
+  #nitroFill { height: 100%; background: #c56cf0; width: 100%; }
+  #speedoRow { display: flex; align-items: baseline; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+  #speedoNum { font-size: 52px; font-weight: 900; line-height: 0.95; text-shadow: 0 3px 12px rgba(0,0,0,0.6); }
+  #speedoUnit { font-size: 11px; color: #b8a8d8; font-weight: 700; }
+  #gearLabel { font-size: 17px; font-weight: 900; color: #ffc92e; }
+  /* prompt + toast + busted */
+  #prompt { position: absolute; left: 50%; transform: translateX(-50%); bottom: 108px; background: rgba(16,10,28,0.85);
+    padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 700; opacity: 0; transition: opacity 0.2s; border: 1px solid rgba(255,201,46,0.5); }
+  #toast { position: absolute; top: 15%; left: 50%; transform: translateX(-50%); font-size: 34px; font-weight: 900;
+    letter-spacing: 0.08em; color: #ffc92e; text-shadow: 0 4px 18px rgba(0,0,0,0.8); opacity: 0; transition: opacity 0.35s; text-align: center; }
+  .toast-sub { font-size: 14px; color: #fff; letter-spacing: 0.2em; margin-top: 4px; }
+  #bustedWrap { position: absolute; top: 30%; left: 50%; transform: translateX(-50%); width: 300px; text-align: center; opacity: 0; transition: opacity 0.2s; }
+  #bustedWrap .bt { font-size: 21px; font-weight: 900; color: #ff5c5c; letter-spacing: 0.3em; text-shadow: 0 2px 10px #000; }
+  #bustedTrack { height: 8px; background: rgba(0,0,0,0.6); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+  #bustedFill { height: 100%; background: #ff5c5c; width: 0%; }
+  /* weapon wheel */
+  #wheel { position: absolute; left: 50%; top: 50%; width: 0; height: 0; display: none; z-index: 6; }
+  .wedge { position: absolute; left: -62px; top: -34px; width: 124px; padding: 9px 6px; text-align: center;
+    background: rgba(16,10,28,0.88); border: 1px solid rgba(255,255,255,0.3); border-radius: 10px; }
+  .wedge.sel { border-color: #ffc92e; box-shadow: 0 0 16px rgba(255,201,46,0.5); }
+  .wedge.locked { opacity: 0.45; }
+  .wedge .wname { font-size: 13px; font-weight: 800; }
+  .wedge .wkind { font-size: 9.5px; color: #b8a8d8; letter-spacing: 0.12em; }
+  .wheel-hub { position: absolute; left: -40px; top: -10px; width: 80px; text-align: center; font-size: 10px; letter-spacing: 0.2em; color: #ffc92e; font-weight: 800; }
+  /* start screen */
+  #startScreen { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, rgba(20,8,34,0.25), rgba(20,8,34,0.62)); pointer-events: auto; }
+  #startCard { width: 620px; max-width: 92vw; padding: 26px 32px; text-align: center; }
+  #startCard h1 { font-size: 58px; font-weight: 900; letter-spacing: 0.04em; line-height: 0.95;
+    background: linear-gradient(92deg, #ffc92e 10%, #ff4fa3 55%, #ff8a4a 95%); -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 6px 30px rgba(255,79,163,0.25); }
+  #startCard .tag { color: #ffd9ec; letter-spacing: 0.34em; font-size: 12px; font-weight: 700; margin-top: 6px; }
+  #startStory { margin: 16px 0 6px; font-size: 14.5px; line-height: 1.5; color: #efe6ff; }
+  #startFeats { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 12px 0 16px; }
+  #startFeats span { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; padding: 4px 9px; border-radius: 20px;
+    background: rgba(255,79,163,0.18); border: 1px solid rgba(255,79,163,0.55); color: #ffd9ec; }
+  .menuBtn { pointer-events: auto; display: block; margin: 8px auto 0; width: 280px; padding: 11px 0; font-size: 16px; font-weight: 800;
+    letter-spacing: 0.1em; color: #181020; background: linear-gradient(92deg, #ffc92e, #ff8a4a); border: 0; border-radius: 9px; cursor: pointer; }
+  .menuBtn:hover { filter: brightness(1.1); }
+  #controlsLine { margin-top: 16px; font-size: 11.5px; color: #b8a8d8; line-height: 1.7; }
+  #controlsLine b { color: #e8dcff; }
+  /* garage menu */
+  #garageMenu { position: absolute; inset: 0; z-index: 9; display: none; align-items: center; justify-content: center; background: rgba(10,5,20,0.55); pointer-events: auto; }
+  #garageCard { width: 540px; max-width: 92vw; padding: 20px 24px; }
+  #garageCard h2 { color: #ffd23e; letter-spacing: 0.08em; font-size: 19px; }
+  #garageCard .sub { color: #b8a8d8; font-size: 12px; margin: 4px 0 12px; }
+  .upg { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid rgba(255,255,255,0.12); }
+  .uname2 { font-weight: 800; font-size: 13.5px; }
+  .ublurb { font-size: 11.5px; color: #b8a8d8; }
+  .upg button { pointer-events: auto; min-width: 96px; padding: 8px 0; font-weight: 800; border: 0; border-radius: 7px; background: #ffc92e; color: #181020; cursor: pointer; }
+  .upg button:disabled { background: #3a2c52; color: #8d7fb0; cursor: default; }
+  /* full-screen flash card (wasted / busted) */
+  #flashCard { position: absolute; inset: 0; z-index: 8; display: none; align-items: center; justify-content: center; background: rgba(14,4,10,0.45); }
+  #flashCard div { font-size: 64px; font-weight: 900; letter-spacing: 0.22em; color: #ff5c5c; text-shadow: 0 6px 30px #000; }
 </style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
 </head>
 <body>
-<canvas id="game" aria-label="Palm Shores: a sunset seaside city to explore on foot and by car"></canvas>
+<div id="app"></div>
+<div id="grade"></div>
+
 <div id="hud">
-  <div id="wanted" aria-label="Wanted level">
-    <span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span>
+  <div id="missionPanel" class="panel">
+    <div class="row1"><span id="mpHead">PALM SHORES</span><span id="mpTimer"></span></div>
+    <div id="mpObjective">Loading the city…</div>
+    <div id="mpSub"></div>
+    <div id="mpStage"></div><div id="mpBar"></div>
+    <div id="mpNext"></div>
+    <div id="mpDistrict">DOWNTOWN</div>
   </div>
-  <div id="cash"><div class="label" id="dayClock">DAY 1 · 18:52</div><div class="amount" id="cashAmount">$250</div><div class="label">Cash</div></div>
-  <div id="vitals">
-    <div class="row"><span class="tag">Health</span><div class="bar" id="healthBar"><i></i></div></div>
-    <div class="row"><span class="tag">Ammo</span><div class="bar" id="ammoBar"><i></i></div></div>
+
+  <div id="pdPanel" class="panel">
+    <div class="row1"><span id="pdHead">SHORES PD RESPONSE</span><span id="pdSight" class="sight seen">IN SIGHT</span></div>
+    <div id="pdUnits"></div>
+    <div id="pdFoot"></div>
   </div>
-  <div id="objective">
-    <div class="title" id="objectiveTitle">Mission</div>
-    <div class="text" id="objectiveText">Meet Luna at the diner</div>
-    <div class="timer" id="objectiveTimer"></div>
+
+  <div id="topRight">
+    <div id="clockLine">DAY 1 · 18:52</div>
+    <div id="cash">$0</div>
+    <div id="stars"></div>
+    <div id="weaponSlots"></div>
+    <div id="ammoLine"></div>
   </div>
-  <div id="missionTag">Mission</div>
-  <div id="rail">
-    <div id="dossier" class="railCard">
-      <div class="head"><span class="name" id="dossierHead">Mission</span><span class="timer" id="dossierTimer"></span></div>
-      <div class="obj" id="dossierObj"></div>
-      <div class="sub" id="dossierSub"></div>
-      <div class="stageRow"><span id="dossierStageLabel"></span><div class="stage" id="dossierStage"></div></div>
-      <div class="next" id="dossierNext"></div>
-      <div class="district" id="dossierDistrict"></div>
+
+  <div id="mapWrap">
+    <canvas id="minimap" width="184" height="184"></canvas>
+    <div id="districtChip">DOWNTOWN</div>
+    <div class="barRow"><span>RESPECT</span><div class="barTrack"><div class="barFill" id="respectFill"></div></div><span class="barVal" id="respectLabel">RESPECT 1</span></div>
+    <div class="barRow"><span>XP</span><div class="barTrack"><div class="barFill" id="xpFill"></div></div><span class="barVal" id="xpLabel">0/1200</span></div>
+    <div class="barRow"><span>HEALTH</span><div class="barTrack"><div class="barFill" id="healthFill"></div></div><span class="barVal"></span></div>
+  </div>
+
+  <div id="dialogue" class="panel" style="opacity:0">
+    <img id="dlgPortrait" alt="Luna">
+    <div><div id="dlgName">LUNA — DISPATCH</div><div id="dlgText"></div></div>
+  </div>
+
+  <div id="rightStack">
+    <div id="radioPanel" class="panel" style="display:none">
+      <span id="radioFreq">WAVE 88.1 · NEON DRIVE</span><span class="eq"><i></i><i></i><i></i><i></i></span>
+      <div id="radioTrack">'Pink Horizon' — Lumen Kids</div>
     </div>
-    <div id="pdPanel" class="railCard">
-      <div class="head"><span class="name" id="pdTitle">Shores PD Response</span><span class="chip evade" id="pdChip">Evading</span></div>
-      <div id="pdRows"></div>
-      <div id="pdFoot"></div>
-    </div>
-    <div id="dialogue" class="railCard">
-      <div class="portrait" aria-hidden="true">
-        <svg viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
-          <rect x="0" y="0" width="54" height="54" fill="#1d2b33"/>
-          <path d="M10 54 L12 40 Q13 30 20 27 L34 27 Q41 30 42 40 L44 54 Z" fill="#241426"/>
-          <ellipse cx="27" cy="25" rx="10" ry="12" fill="#b98a68"/>
-          <path d="M16 24 Q15 10 27 9 Q39 10 38 24 Q38 16 33 13 Q27 17 21 13 Q16 16 16 24 Z" fill="#2a1a2e"/>
-          <path d="M38 24 Q39 12 30 10" fill="none" stroke="#ffb35c" stroke-width="2" stroke-linecap="round"/>
-          <path d="M15 20 Q16 8 27 7 Q38 8 39 20" fill="none" stroke="#101018" stroke-width="3" stroke-linecap="round"/>
-          <rect x="36" y="19" width="5" height="9" rx="2" fill="#101018"/>
-          <path d="M38 28 Q37 35 31 36" fill="none" stroke="#101018" stroke-width="2.4" stroke-linecap="round"/>
-          <circle cx="30.5" cy="36.5" r="1.6" fill="#101018"/>
-        </svg>
-      </div>
-      <div>
-        <div class="name">Luna — Dispatch</div>
-        <div class="text" id="dialogueText"></div>
-      </div>
+    <div id="vehPanel" class="panel" style="display:none">
+      <div id="vehName">VESPERA GT</div>
+      <div class="condRow"><span>COND</span><div id="vehCondTrack"><div id="vehCondFill"></div></div></div>
+      <div class="condRow"><span>NITRO</span><div id="nitroTrack"><div id="nitroFill"></div></div></div>
+      <div id="speedoRow"><span id="gearLabel">D1</span><span id="speedoNum">0</span><span id="speedoUnit">KM/H</span></div>
     </div>
   </div>
-  <div id="minimapWrap"><canvas id="minimap" width="200" height="200"></canvas><div class="ring"></div></div>
-  <div id="radarLabel"></div>
-  <div id="progress">
-    <div class="prow"><span class="plabel" id="respectLabel">RESPECT 1</span><div class="pbar" id="respectBar"><i></i></div></div>
-    <div class="prow"><span class="plabel" id="xpLabel">XP 0/150</span><div class="pbar" id="xpBar"><i></i></div></div>
-  </div>
-  <div id="weaponSlots"></div>
-  <div id="wheel"></div>
-  <div id="weapon">Pistol · <b id="ammoCount">12 / 72</b></div>
-  <div id="radio"><span class="station" id="radioStation">PALM 98.7 · SALTLINE</span><span class="track" id="radioTrack">'Coral Static' — Velvet Gulls</span><span class="eq" aria-hidden="true"><i></i><i></i><i></i></span></div>
-  <div id="speedo"><div class="value"><span id="speedValue">0</span><span id="speedGear"></span></div><div class="unit">km/h</div><div class="car" id="carName">Sedan</div><div id="carCond"><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div><div id="carCondPct">100%</div></div>
-  <div id="banner"><div class="big" id="bannerBig">Busted</div><div class="small" id="bannerSmall">The Shores PD found you</div></div>
+
+  <div id="prompt"></div>
   <div id="toast"></div>
-  <div id="hint"></div>
-  <div id="flash"></div>
+  <div id="bustedWrap"><div class="bt">BUSTED</div><div id="bustedTrack"><div id="bustedFill"></div></div></div>
+  <div id="wheel"></div>
+  <div id="flashCard"><div id="flashText">WASTED</div></div>
 </div>
 
-<div id="start" class="overlay">
-  <div class="panel" id="startPanel">
-    <div class="eyebrow">Palm Shores · Chapter One</div>
-    <h1 id="title">Palm Shores</h1>
-    <div class="subtitle">A sunset city with open arms</div>
-    <p class="story">
-      Ten years away, and the city still smells of salt and hot asphalt. <em>Luna</em> called from the
-      Anchor Diner with one last job in the marina — and half the Shores PD on the take.
-      Eight jobs stand between you and a clean slate: couriers, a borrowed coupe, a warehouse that
-      shoots back, a money run under a police helicopter, and a street race for the city's respect.
-      Take Palm Shores back one block at a time, on foot or behind the wheel of someone else's car.
-    </p>
-    <div class="menu" id="startMenu">
-      <div class="item"><span class="key">↵</span> Start a new evening</div>
-      <div class="item"><span class="key">C</span> Continue from your save</div>
-      <div class="item"><span class="key">R</span> Reset save &amp; start over</div>
-    </div>
-    <div class="controls">
-      <span><b>WASD</b> move / drive</span>
-      <span><b>Mouse</b> aim · <b>Click</b> shoot</span>
-      <span><b>Shift</b> sprint</span>
-      <span><b>E</b> enter / leave car</span>
-      <span><b>R</b> reload</span>
-      <span><b>Q</b> weapon wheel</span>
-      <span><b>P / Esc</b> pause</span>
-      <span><b>M</b> mute sound</span>
-      <span><b>Enter</b> start</span>
-      <span><b>1–8</b> mission markers</span>
-    </div>
-    <div class="footer">A fictional city, built from nothing but canvas and evening light.</div>
+<div id="garageMenu">
+  <div id="garageCard" class="panel">
+    <h2>BAYLINE GARAGE — TUNING</h2>
+    <div class="sub">Cash on hand: <b id="garageCash">$0</b> · Upgrades fit your Vespera GT and stay fitted.</div>
+    <div id="garageList"></div>
+    <button class="menuBtn" id="btnGarageClose" style="width:200px">BACK TO THE STREET</button>
   </div>
 </div>
 
-<div id="pause" class="overlay">
-  <div class="panel" id="pausePanel">
-    <div class="eyebrow">Paused</div>
-    <h2>The evening waits.</h2>
-    <div class="menu" id="pauseMenu">
-      <div class="item"><span class="key">↵</span> Resume</div>
-      <div class="item"><span class="key">R</span> Restart current mission</div>
-      <div class="item"><span class="key">X</span> Reset save</div>
+<div id="startScreen" style="display:none">
+  <div id="startCard" class="panel">
+    <h1>PALM SHORES</h1>
+    <div class="tag">AN OPEN-WORLD CRIME STORY IN ONE SUNSET CITY</div>
+    <div id="startStory"></div>
+    <div id="startFeats">
+      <span>8 STORY JOBS</span><span>5-STAR SHORES PD</span><span>AIR-1 HELICOPTER</span><span>ROADBLOCKS</span>
+      <span>WEAPON WHEEL — 3 GUNS</span><span>CARJACK ANYTHING</span><span>GARAGE TUNING</span><span>12 SUNSET STARS</span><span>4 RADIO STATIONS</span>
+    </div>
+    <button class="menuBtn" id="btnContinue">CONTINUE</button>
+    <button class="menuBtn" id="btnNew">START — DAY 1</button>
+    <div id="controlsLine">
+      <b>WASD</b> drive / walk · <b>MOUSE</b> aim · <b>CLICK</b> shoot · <b>Q</b> weapon wheel · <b>R</b> reload ·
+      <b>F</b> enter / steal car · <b>SPACE</b> handbrake · <b>SHIFT</b> run / nitro · <b>N</b> radio · <b>E</b> garage bay · <b>M</b> mute
     </div>
   </div>
 </div>
 
-<p id="status" role="status" aria-live="polite"></p>
-
-<script src="./vendor/gsap.min.js"></script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

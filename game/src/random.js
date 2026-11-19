@@ -1,49 +1,25 @@
-// A small seeded random number generator (mulberry32): the same seed gives the same city, the
-// same traffic and the same screenshots. Everything procedural draws from one of these, so a
-// scene staged with ?seed=7 looks identical every time it is photographed.
+// Deterministic seeded randomness: the city, traffic and staged screenshot
+// scenes all draw from one seed so a render can be reproduced exactly.
 
-export function createRandom(seed) {
-  let a = seed | 0;
-  function random() {
-    a = (a + 0x6d2b79f5) | 0;
+export function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  }
-
-  /** A random number in [min, max). */
-  random.range = function range(min, max) {
-    return min + random() * (max - min);
   };
-
-  /** A random integer in [min, max]. */
-  random.int = function int(min, max) {
-    return Math.floor(min + random() * (max - min + 1));
-  };
-
-  /** One element of `list`. */
-  random.pick = function pick(list) {
-    return list[Math.floor(random() * list.length)];
-  };
-
-  /** True `chance` of the time. */
-  random.chance = function chance(probability) {
-    return random() < probability;
-  };
-
-  /** A shuffled copy of `list` (Fisher-Yates, on the seeded stream). */
-  random.shuffle = function shuffle(list) {
-    const copy = list.slice();
-    for (let index = copy.length - 1; index > 0; index -= 1) {
-      const other = Math.floor(random() * (index + 1));
-      const swap = copy[index];
-      copy[index] = copy[other];
-      copy[other] = swap;
-    }
-    return copy;
-  };
-
-  return random;
 }
 
-// Round 5 note: the deterministic seed also places the FLAMINGO FM rooftop billboards.
+export function rngRange(rng, lo, hi) { return lo + rng() * (hi - lo); }
+export function rngInt(rng, lo, hi) { return Math.floor(lo + rng() * (hi - lo + 1)); }
+export function rngPick(rng, arr) { return arr[Math.floor(rng() * arr.length) % arr.length]; }
+export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+export function lerp(a, b, t) { return a + (b - a) * t; }
+export function dist2d(ax, az, bx, bz) { return Math.hypot(ax - bx, az - bz); }
+export function angleLerp(a, b, t) {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}

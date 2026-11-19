@@ -1,0 +1,196 @@
+// Procedural canvas textures: Palm Shores ships no image files at all.
+// Sunsets, facades, billboards, palm fronds and asphalt are all painted here
+// at boot from the shared seed, so the whole city is code.
+
+import * as THREE from 'three';
+import { rngRange, rngPick } from './random.js';
+
+function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function tex(c, rx = 1, ry = 1) {
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry);
+  t.anisotropy = 4; t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// The sunset sky: violet zenith melting through magenta into a tangerine band.
+export function skyTexture() {
+  const c = canvas(64, 512), g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0.0, '#1d1440'); grad.addColorStop(0.34, '#4b2064');
+  grad.addColorStop(0.55, '#93356e'); grad.addColorStop(0.72, '#e0527a');
+  grad.addColorStop(0.86, '#ff8a4a'); grad.addColorStop(0.96, '#ffc46b');
+  grad.addColorStop(1.0, '#ffe3a1');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 512);
+  return tex(c);
+}
+
+// Soft radial glow used for the sun, headlights, sirens and the heli beam pool.
+export function glowTexture(inner = 'rgba(255,255,255,1)', outer = 'rgba(255,255,255,0)') {
+  const c = canvas(128, 128), g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  grad.addColorStop(0, inner); grad.addColorStop(1, outer);
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  return tex(c);
+}
+
+const FACADE_PALETTES = [
+  ['#f7d9b0', '#e8906f'], ['#fdeeda', '#7fd4c1'], ['#f6c6d8', '#e0527a'], ['#d9ecf7', '#5b8def'],
+  ['#f2e3f7', '#8d6fd1'], ['#fff3c9', '#e8a547'], ['#d8f3dc', '#3fbf8f'], ['#f9dcc4', '#d94f70'],
+];
+
+// An art-deco facade: banded windows (some lit gold for the evening), a neon
+// trim line under the parapet and a striped awning over the ground floor.
+export function facadeTexture(rng, floors, cols) {
+  const [wall, trim] = FACADE_PALETTES[Math.floor(rng() * FACADE_PALETTES.length)];
+  const c = canvas(256, 512), g = c.getContext('2d');
+  g.fillStyle = wall; g.fillRect(0, 0, 256, 512);
+  g.fillStyle = 'rgba(0,0,0,0.08)'; g.fillRect(0, 0, 256, 10);
+  g.fillStyle = trim; g.fillRect(0, 12, 256, 5);
+  const ww = 256 / cols, wh = 512 / (floors + 1);
+  for (let f = 0; f < floors; f++) for (let col = 0; col < cols; col++) {
+    const x = col * ww + ww * 0.24, y = 30 + f * wh + wh * 0.16, w = ww * 0.52, h = wh * 0.6;
+    const lit = rng() < 0.55;
+    g.fillStyle = lit ? (rng() < 0.7 ? '#ffe3a1' : '#bdeaff') : '#352c4c';
+    g.fillRect(x, y, w, h);
+    g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(x, y, w, 3);
+    g.fillStyle = trim; g.fillRect(x - 3, y - 3, w + 6, 3);
+  }
+  const gy = 512 - wh;
+  g.fillStyle = '#241a33'; g.fillRect(0, gy, 256, wh);
+  for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#f7f3ea' : trim; g.fillRect(i * 32, gy - 12, 32, 12); }
+  g.fillStyle = '#ffd98a'; g.fillRect(108, gy + 14, 40, wh - 14);
+  return tex(c);
+}
+
+export function roofTexture(rng) {
+  const c = canvas(128, 128), g = c.getContext('2d');
+  g.fillStyle = rngPick(rng, ['#8a5a44', '#6e4a5e', '#59465e', '#7a4a3a']); g.fillRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(0,0,0,0.15)';
+  for (let i = 0; i < 40; i++) g.fillRect(rng() * 128, rng() * 128, rngRange(rng, 4, 18), 2);
+  return tex(c);
+}
+
+// Asphalt with a worn centre line; drawn per road segment and repeated.
+export function roadTexture() {
+  const c = canvas(128, 256), g = c.getContext('2d');
+  g.fillStyle = '#333040'; g.fillRect(0, 0, 128, 256);
+  for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * 0.05})`; g.fillRect(Math.random() * 128, Math.random() * 256, 1.5, 1.5); }
+  for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.16})`; g.fillRect(Math.random() * 128, Math.random() * 256, 2, 2); }
+  g.fillStyle = '#f7f3ea'; g.fillRect(2, 0, 4, 256); g.fillRect(122, 0, 4, 256);
+  g.fillStyle = '#ffd23e'; g.fillRect(61, 8, 6, 62); g.fillRect(61, 150, 6, 62);
+  // sunset sheen baked into the middle of the lane
+  const sheen = g.createLinearGradient(0, 0, 128, 0);
+  sheen.addColorStop(0, 'rgba(255,110,140,0)'); sheen.addColorStop(0.5, 'rgba(255,120,110,0.13)'); sheen.addColorStop(1, 'rgba(255,110,140,0)');
+  g.fillStyle = sheen; g.fillRect(0, 0, 128, 256);
+  return tex(c);
+}
+
+export function crosswalkTexture() {
+  const c = canvas(128, 128), g = c.getContext('2d');
+  g.fillStyle = '#333040'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(247,243,234,0.85)';
+  for (let i = 0; i < 5; i++) g.fillRect(10 + i * 23, 12, 13, 104);
+  return tex(c);
+}
+
+export function sidewalkTexture() {
+  const c = canvas(128, 128), g = c.getContext('2d');
+  g.fillStyle = '#9a8fa3'; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = 'rgba(40,30,55,0.5)'; g.lineWidth = 2;
+  g.strokeRect(1, 1, 126, 126); g.beginPath(); g.moveTo(64, 0); g.lineTo(64, 128); g.stroke();
+  for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(60,40,70,${Math.random() * 0.12})`; g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
+  return tex(c);
+}
+
+export function sandTexture() {
+  const c = canvas(128, 128), g = c.getContext('2d');
+  g.fillStyle = '#eecfa1'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 700; i++) { g.fillStyle = `rgba(160,110,60,${Math.random() * 0.2})`; g.fillRect(Math.random() * 128, Math.random() * 128, 1.6, 1.6); }
+  return tex(c);
+}
+
+export function waterTexture() {
+  const c = canvas(256, 256), g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#7a2d5e'); grad.addColorStop(0.5, '#46255e'); grad.addColorStop(1, '#2c1e4e');
+  g.fillStyle = grad; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 90; i++) {
+    g.fillStyle = `rgba(255,${140 + Math.random() * 80},90,${0.05 + Math.random() * 0.16})`;
+    g.fillRect(Math.random() * 256, Math.random() * 256, 12 + Math.random() * 42, 1.6);
+  }
+  return tex(c);
+}
+
+// One palm frond, alpha-cut; six of them make a crown.
+export function palmLeafTexture() {
+  const c = canvas(128, 128), g = c.getContext('2d');
+  g.clearRect(0, 0, 128, 128);
+  g.strokeStyle = '#35a05c'; g.lineWidth = 5; g.beginPath(); g.moveTo(4, 124); g.quadraticCurveTo(50, 50, 124, 18); g.stroke();
+  g.lineWidth = 2.4;
+  for (let t = 0.08; t < 0.98; t += 0.07) {
+    const x = 4 + (124 - 4) * t, y = 124 + (18 - 124) * t * t - Math.sin(t * Math.PI) * 22;
+    g.strokeStyle = t % 0.14 < 0.07 ? '#4cc673' : '#35a05c';
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + 14, y + 20 + t * 12); g.stroke();
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x - 4, y + 22 + t * 10); g.stroke();
+  }
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+// Big neon billboards and shop signs, painted to order.
+export function billboardTexture(main, sub, bg, fg, accent) {
+  const c = canvas(512, 256), g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, 512, 256);
+  g.strokeStyle = accent; g.lineWidth = 10; g.strokeRect(10, 10, 492, 236);
+  g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '900 74px system-ui, sans-serif';
+  g.shadowColor = fg; g.shadowBlur = 26;
+  g.fillText(main, 256, sub ? 104 : 128);
+  if (sub) { g.font = '700 34px system-ui, sans-serif'; g.shadowBlur = 12; g.fillStyle = accent; g.fillText(sub, 256, 182); }
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+export function signTexture(text, bg, fg) {
+  const c = canvas(256, 64), g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, 256, 64);
+  g.fillStyle = fg; g.font = '800 30px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.shadowColor = fg; g.shadowBlur = 8; g.fillText(text, 128, 34);
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+// Weathered pier deck: plank runs with tar seams, stains and a painted safety line.
+export function pierTexture() {
+  const c = canvas(256, 256), g = c.getContext('2d');
+  g.fillStyle = '#7d5f42'; g.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 256; y += 32) {
+    const tone = 0.9 + Math.random() * 0.25;
+    g.fillStyle = `rgb(${125 * tone | 0},${95 * tone | 0},${66 * tone | 0})`; g.fillRect(0, y, 256, 30);
+    g.fillStyle = 'rgba(30,20,14,0.85)'; g.fillRect(0, y + 30, 256, 2);
+    g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(Math.random() * 200, y, 3, 30);
+  }
+  for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(40,26,16,${Math.random() * 0.16})`; g.fillRect(Math.random() * 256, Math.random() * 256, 2 + Math.random() * 5, 1.5); }
+  g.fillStyle = 'rgba(255,196,64,0.55)'; g.fillRect(0, 120, 256, 5);
+  g.fillStyle = 'rgba(255,255,255,0.10)'; g.fillRect(0, 200, 256, 3);
+  return tex(c);
+}
+
+// Luna's portrait for the dialogue box: a stylised dispatcher with a headset.
+export function lunaPortraitTexture() {
+  const c = canvas(96, 96), g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 96);
+  grad.addColorStop(0, '#ff8a4a'); grad.addColorStop(1, '#93356e');
+  g.fillStyle = grad; g.fillRect(0, 0, 96, 96);
+  g.fillStyle = '#2c1a2e'; g.beginPath(); g.arc(48, 40, 17, 0, 7); g.fill();
+  g.fillStyle = '#f2b183'; g.beginPath(); g.arc(48, 42, 13, 0, 7); g.fill();
+  g.fillStyle = '#181020'; g.beginPath(); g.arc(48, 33, 13.5, Math.PI, 0); g.fill();
+  g.fillRect(30, 30, 5, 16); g.fillRect(61, 30, 5, 16);
+  g.fillStyle = '#14101f'; g.fillRect(28, 62, 40, 34);
+  g.fillStyle = '#ff4fa3'; g.fillRect(44, 66, 8, 30);
+  g.strokeStyle = '#0e0a16'; g.lineWidth = 3; g.beginPath(); g.arc(48, 44, 19, 0.4, 2.2); g.stroke();
+  g.fillStyle = '#0e0a16'; g.fillRect(63, 58, 5, 5);
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}

@@ -1,239 +1,134 @@
-// The pistol and everything it throws: bullets with a little travel time, the muzzle flash at the
-// barrel, sparks where a round lands, and the hit tests against people, cars and police cruisers.
-// Enemy rounds travel through the same lists, flagged hostile, and hurt the player instead.
-import { PLAYER } from './config.js';
+// Combat: the three-weapon wheel (KESTREL 9, WASP 6149, MARLIN 12), hitscan
+// shooting with tracers and muzzle flash, and the rival-crew hostiles who
+// guard two of the story jobs. Weapons unlock as the story advances.
 
-const BULLET_SPEED = 2100;
-const BULLET_LIFE = 0.42;
+import * as THREE from 'three';
+import { WEAPONS } from './config.js';
+import { clamp, dist2d } from './random.js';
+import { glowTexture } from './textures.js';
 
-/**
- * The player's arsenal, lightest first. The pistol is carried from the
- * first minute; the SMG and the scattergun are earned on the story —
- * mission three pays out the WASP, mission five the MARLIN. One trigger
- * pull costs one round from the magazine however many pellets it throws.
- */
-export const WEAPONS = [
-  { id: 'pistol', name: 'Pistol', model: 'KESTREL 9', damage: 34, fireDelay: 0.26, spread: 0.03, pellets: 1, magazine: 12, reloadTime: 1.25, startReserve: 72 },
-  { id: 'smg', name: 'SMG', model: 'WASP 6149', damage: 16, fireDelay: 0.085, spread: 0.1, pellets: 1, magazine: 30, reloadTime: 1.5, startReserve: 90 },
-  { id: 'scatter', name: 'Scattergun', model: 'MARLIN 12', damage: 11, fireDelay: 0.8, spread: 0.26, pellets: 6, magazine: 6, reloadTime: 1.9, startReserve: 24 },
-];
+export function createCombat(scene) {
+  const state = WEAPONS.map(w => ({ mag: w.magazine, reserve: w.reserve === Infinity ? Infinity : w.reserve }));
+  const tracers = [];
+  const tracerMat = new THREE.MeshBasicMaterial({ color: 0xffd98a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+  const flashTex = glowTexture('rgba(255,220,150,1)', 'rgba(255,140,40,0)');
+  const hostiles = [];
 
-export function createCombat(world) {
-  const bullets = [];
-  const flashes = [];
-  const sparks = [];
-  const casings = [];
-  const hitmarks = [];
-  let shake = 0;
-
-  // The weapon shelf: per-weapon magazine and reserve counts, which one is
-  // in hand, and which have been earned. The live counts the player spends
-  // sit on the player state; main.js swaps them through here on a switch.
-  const weaponState = WEAPONS.map((def, i) => ({ def, mag: def.magazine, reserve: def.startReserve, unlocked: i === 0 }));
-  let currentWeapon = 0;
-
-  /** The weapon in hand: its definition plus its stored counts. */
-  function weapon() {
-    return weaponState[currentWeapon];
-  }
-
-  /** Put another earned weapon in hand. False when it is still locked. */
-  function selectWeapon(index) {
-    if (!weaponState[index] || !weaponState[index].unlocked) return false;
-    currentWeapon = index;
-    return true;
-  }
-
-  /** Earn a weapon (a story payout): it joins the wheel for good. */
-  function unlockWeapon(index) {
-    if (weaponState[index]) weaponState[index].unlocked = true;
-  }
-
-  /** Every weapon's shelf state, for the wheel and the slot strip. */
-  function weaponStates() {
-    return weaponState.map((entry, i) => ({ ...entry, active: i === currentWeapon }));
-  }
-
-  /** Force a weapon's exact state — the screenshot rig stages a loadout. */
-  function stageWeapon(index, mag, reserve) {
-    const entry = weaponState[index];
-    if (!entry) return;
-    entry.unlocked = true;
-    entry.mag = mag;
-    entry.reserve = reserve;
-    currentWeapon = index;
-  }
-
-  /** A fresh evening: pistol only, every magazine full. */
-  function resetWeapons() {
-    weaponState.forEach((entry, i) => {
-      entry.mag = entry.def.magazine;
-      entry.reserve = entry.def.startReserve;
-      entry.unlocked = i === 0;
-    });
-    currentWeapon = 0;
-  }
-
-  function addBullet(x, y, angle, hostile, damage) {
-    bullets.push({
-      x: x + Math.cos(angle) * 20,
-      y: y + Math.sin(angle) * 20,
-      vx: Math.cos(angle) * BULLET_SPEED,
-      vy: Math.sin(angle) * BULLET_SPEED,
-      life: BULLET_LIFE,
-      hostile,
-      damage,
-    });
-  }
-
-  /** Fire one round from (x, y) toward `angle`; the caller pays ammo and tells the police. */
-  function shoot(x, y, angle, { hostile = false, damage = 34, spread = 0.03 } = {}) {
-    const aim = angle + (Math.random() - 0.5) * spread;
-    addBullet(x, y, aim, hostile, damage);
-    flashes.push({ x: x + Math.cos(aim) * 18, y: y + Math.sin(aim) * 18, angle: aim, life: 0.07, hostile });
-    casings.push({ x, y, vx: -Math.cos(aim) * 40 + (Math.random() - 0.5) * 30, vy: -Math.sin(aim) * 40, life: 1.4, spin: Math.random() * 6 });
-    shake = Math.max(shake, 2.4);
-    return aim;
-  }
-
-  /** A burst of sparks where a round struck something. */
-  function spark(x, y, angle, color = '#ffd28a') {
-    for (let index = 0; index < 4; index += 1) {
-      sparks.push({
-        x,
-        y,
-        vx: Math.cos(angle + Math.PI + (Math.random() - 0.5) * 1.6) * (60 + Math.random() * 140),
-        vy: Math.sin(angle + Math.PI + (Math.random() - 0.5) * 1.6) * (60 + Math.random() * 140),
-        life: 0.25 + Math.random() * 0.2,
-        color,
-      });
-    }
-  }
-
-  /**
-   * Move every round one step and resolve hits. `targets` holds the pedestrians, the police cars,
-   * the traffic and mission actors, each with x, y and a radius; a hit calls onHit(kind, entity).
-   */
-  function update(dt, ctx) {
-    shake *= 0.88;
-    for (let index = bullets.length - 1; index >= 0; index -= 1) {
-      const bullet = bullets[index];
-      bullet.life -= dt;
-      const steps = 2;
-      let dead = bullet.life <= 0;
-      for (let step = 0; step < steps && !dead; step += 1) {
-        bullet.x += (bullet.vx * dt) / steps;
-        bullet.y += (bullet.vy * dt) / steps;
-        if (bullet.x < 0 || bullet.x > world.width || bullet.y < 0 || bullet.y > world.height) {
-          dead = true;
-          break;
+  const combat = {
+    current: 0, wheelOpen: false, lastShot: -999, reloadingUntil: 0,
+    onShoot: null, onHostileDown: null, onPlayerHit: null,
+    unlocked(idx, missionsDone) { return missionsDone >= WEAPONS[idx].unlockMission; },
+    weapon() { return WEAPONS[this.current]; },
+    ammo() { return state[this.current]; },
+    cycle(missionsDone) {
+      for (let n = 1; n <= 3; n++) { const i = (this.current + n) % 3; if (this.unlocked(i, missionsDone)) { this.current = i; return; } }
+    },
+    select(idx, missionsDone) { if (this.unlocked(idx, missionsDone)) this.current = idx; },
+    reload(now) {
+      const w = this.weapon(), s = this.ammo();
+      if (s.mag >= w.magazine || s.reserve <= 0) return;
+      const take = Math.min(w.magazine - s.mag, s.reserve);
+      s.mag += take; if (s.reserve !== Infinity) s.reserve -= take;
+      this.reloadingUntil = now + 700;
+    },
+    tryFire(now, origin, dir, world, missionsDone) {
+      const w = this.weapon(), s = this.ammo();
+      if (now - this.lastShot < w.rate || now < this.reloadingUntil || this.wheelOpen) return false;
+      if (s.mag <= 0) { this.reload(now); return false; }
+      this.lastShot = now; s.mag--;
+      this.onShoot?.(w);
+      for (let p = 0; p < w.pellets; p++) {
+        const d = dir.clone();
+        d.x += (Math.random() - 0.5) * w.spread * 2; d.y += (Math.random() - 0.5) * w.spread; d.z += (Math.random() - 0.5) * w.spread * 2;
+        d.normalize();
+        this.trace(origin, d, w, world);
+      }
+      return true;
+    },
+    trace(origin, dir, w, world) {
+      // step the ray: buildings stop it, hostiles take it
+      let hitPoint = null, hitHostile = null;
+      for (let t = 1; t < 70; t += 1) {
+        const px = origin.x + dir.x * t, py = origin.y + dir.y * t, pz = origin.z + dir.z * t;
+        if (py < 0) { hitPoint = new THREE.Vector3(px, 0, pz); break; }
+        let blocked = false;
+        for (const c of world.colliders) if (px > c.minX && px < c.maxX && pz > c.minZ && pz < c.maxZ && py < 14) { blocked = true; break; }
+        if (blocked) { hitPoint = new THREE.Vector3(px, py, pz); break; }
+        for (const h of hostiles) {
+          if (h.dead) continue;
+          const hp = h.mesh.position;
+          if (Math.abs(px - hp.x) < 0.55 && Math.abs(pz - hp.z) < 0.55 && py > 0.2 && py < 1.9) { hitHostile = h; hitPoint = new THREE.Vector3(px, py, pz); break; }
         }
-        // Walls stop rounds.
-        const wall = world.solids.find(
-          (solid) => solid.kind === 'building' && bullet.x > solid.x && bullet.x < solid.x + solid.w && bullet.y > solid.y && bullet.y < solid.y + solid.h,
-        );
-        if (wall) {
-          spark(bullet.x, bullet.y, Math.atan2(bullet.vy, bullet.vx), '#e8d9c0');
-          if (ctx.onWallHit) ctx.onWallHit(wall, bullet);
-          dead = true;
-          break;
-        }
-        if (bullet.hostile) {
-          if (ctx.player && Math.hypot(ctx.player.x - bullet.x, ctx.player.y - bullet.y) < PLAYER.radius + 4) {
-            ctx.onPlayerHit(bullet.damage);
-            hitmarks.push({ x: bullet.x, y: bullet.y, life: 0.14 });
-            spark(bullet.x, bullet.y, Math.atan2(bullet.vy, bullet.vx), '#ff7a6a');
-            dead = true;
-            break;
-          }
-        } else {
-          const hit = findVictim(bullet, ctx);
-          if (hit) {
-            ctx.onHit(hit.kind, hit.entity, bullet);
-            if (hit.kind === 'actor') hitmarks.push({ x: bullet.x, y: bullet.y, life: 0.14 });
-            spark(bullet.x, bullet.y, Math.atan2(bullet.vy, bullet.vx), hit.kind === 'car' ? '#ffb46a' : '#d8564a');
-            dead = true;
-            break;
-          }
+        if (hitHostile) break;
+      }
+      const end = hitPoint ?? origin.clone().add(dir.clone().multiplyScalar(70));
+      const len = origin.distanceTo(end);
+      const geo = new THREE.BoxGeometry(0.03, 0.03, len);
+      const m = new THREE.Mesh(geo, tracerMat);
+      m.position.copy(origin).lerp(end, 0.5);
+      m.lookAt(end); m.userData.ttl = 0.07;
+      scene.add(m); tracers.push(m);
+      if (hitHostile) {
+        hitHostile.hp -= w.damage;
+        hitHostile.flash = 0.12;
+        if (hitHostile.hp <= 0 && !hitHostile.dead) {
+          hitHostile.dead = true; hitHostile.deathT = 0;
+          this.onHostileDown?.(hitHostile);
         }
       }
-      if (dead) bullets.splice(index, 1);
-    }
-    for (let index = flashes.length - 1; index >= 0; index -= 1) {
-      flashes[index].life -= dt;
-      if (flashes[index].life <= 0) flashes.splice(index, 1);
-    }
-    for (let index = hitmarks.length - 1; index >= 0; index -= 1) {
-      hitmarks[index].life -= dt;
-      if (hitmarks[index].life <= 0) hitmarks.splice(index, 1);
-    }
-    for (let index = sparks.length - 1; index >= 0; index -= 1) {
-      const s = sparks[index];
-      s.life -= dt;
-      s.x += s.vx * dt;
-      s.y += s.vy * dt;
-      s.vx *= 0.93;
-      s.vy *= 0.93;
-      if (s.life <= 0) sparks.splice(index, 1);
-    }
-    for (let index = casings.length - 1; index >= 0; index -= 1) {
-      const c = casings[index];
-      c.life -= dt;
-      c.x += c.vx * dt;
-      c.y += c.vy * dt;
-      c.vx *= 0.9;
-      c.vy *= 0.9;
-      c.spin += dt * 20;
-      if (c.life <= 0) casings.splice(index, 1);
-    }
-  }
-
-  /** The first thing a player round touches inside its step, or null. */
-  function findVictim(bullet, ctx) {
-    for (const person of ctx.pedestrians ?? []) {
-      if (person.dead) continue;
-      if (Math.hypot(person.x - bullet.x, person.y - bullet.y) < 12) return { kind: 'person', entity: person };
-    }
-    for (const actor of ctx.actors ?? []) {
-      if (actor.dead) continue;
-      if (Math.hypot(actor.x - bullet.x, actor.y - bullet.y) < 16) return { kind: 'actor', entity: actor };
-    }
-    for (const car of ctx.cars ?? []) {
-      if (Math.hypot(car.x - bullet.x, car.y - bullet.y) < 22) return { kind: 'car', entity: car };
-    }
-    return null;
-  }
-
-  function clear() {
-    bullets.length = 0;
-    flashes.length = 0;
-    sparks.length = 0;
-    casings.length = 0;
-    hitmarks.length = 0;
-    shake = 0;
-  }
-
-  return {
-    bullets,
-    flashes,
-    sparks,
-    casings,
-    hitmarks,
-    update,
-    shoot,
-    spark,
-    clear,
-    weapon,
-    selectWeapon,
-    unlockWeapon,
-    weaponStates,
-    stageWeapon,
-    resetWeapons,
-    get currentWeaponIndex() {
-      return currentWeapon;
     },
-    get shake() {
-      return shake;
+    spawnHostile(x, z, opts = {}) {
+      const g = new THREE.Group();
+      const jacket = new THREE.MeshStandardMaterial({ color: opts.color ?? 0xd94f70, roughness: 0.8 });
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.62, 0.24), jacket); torso.position.y = 1.12; torso.castShadow = true; g.add(torso);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.26), new THREE.MeshStandardMaterial({ color: 0xc98a5e })); head.position.y = 1.62; g.add(head);
+      const legs = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.8, 0.2), new THREE.MeshStandardMaterial({ color: 0x1d1a26 })); legs.position.y = 0.42; g.add(legs);
+      const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.5), new THREE.MeshStandardMaterial({ color: 0x111116 })); gun.position.set(0.3, 1.25, 0.3); g.add(gun);
+      g.position.set(x, 0, z); scene.add(g);
+      const h = { mesh: g, hp: opts.hp ?? 100, dead: false, flash: 0, burstT: Math.random() * 2, home: { x, z }, name: opts.name ?? 'RIVAL' };
+      hostiles.push(h);
+      return h;
+    },
+    clearHostiles() { for (const h of hostiles) scene.remove(h.mesh); hostiles.length = 0; },
+    hostilesAlive() { return hostiles.filter(h => !h.dead); },
+    update(dt, playerPos, playerAlive) {
+      for (let i = tracers.length - 1; i >= 0; i--) {
+        tracers[i].userData.ttl -= dt;
+        if (tracers[i].userData.ttl <= 0) { scene.remove(tracers[i]); tracers[i].geometry.dispose(); tracers.splice(i, 1); }
+      }
+      for (const h of hostiles) {
+        const p = h.mesh.position;
+        if (h.flash > 0) { h.flash -= dt; h.mesh.children[0].material.emissive = new THREE.Color(0x881111); }
+        else h.mesh.children[0].material.emissive = new THREE.Color(0x000000);
+        if (h.dead) {
+          h.deathT = (h.deathT ?? 0) + dt;
+          h.mesh.rotation.x = Math.min(Math.PI / 2, h.deathT * 4);
+          h.mesh.position.y = Math.max(0.1, 0.35 - h.deathT * 0.2);
+          continue;
+        }
+        if (!playerAlive) continue;
+        const d = dist2d(p.x, p.z, playerPos.x, playerPos.z);
+        h.mesh.rotation.y = Math.atan2(playerPos.x - p.x, playerPos.z - p.z);
+        if (d > 15) { // close the distance
+          p.x += Math.sin(h.mesh.rotation.y) * dt * 2.6; p.z += Math.cos(h.mesh.rotation.y) * dt * 2.6;
+        } else if (d < 7) { // keep some nerve
+          p.x -= Math.sin(h.mesh.rotation.y) * dt * 1.4; p.z -= Math.cos(h.mesh.rotation.y) * dt * 1.4;
+        }
+        h.burstT -= dt;
+        if (d < 30 && h.burstT <= 0) {
+          h.burstT = 1.1 + Math.random() * 1.4;
+          const hitChance = clamp(0.62 - d * 0.013, 0.12, 0.6);
+          if (Math.random() < hitChance) this.onPlayerHit?.(7 + Math.random() * 6);
+          // their tracer, from gun height toward the player
+          const from = new THREE.Vector3(p.x, 1.3, p.z);
+          const to = new THREE.Vector3(playerPos.x, 1.1, playerPos.z);
+          const len = from.distanceTo(to);
+          const m = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, len), tracerMat);
+          m.position.copy(from).lerp(to, 0.5); m.lookAt(to); m.userData.ttl = 0.06;
+          scene.add(m); tracers.push(m);
+        }
+      }
     },
   };
+  return combat;
 }

@@ -1,89 +1,70 @@
-// The Shores PD air unit: one helicopter that joins the hunt at three
-// stars and shadows the player from above, its spotlight pinned to the
-// street below. It never lands and never shoots — its weapon is the
-// light: while the spot holds the player, every cruiser in the city
-// knows exactly where to drive. It also takes a seat on the response
-// panel as AIR-1 OSPREY, so the panel's count stays honest.
-import { POLICE } from './config.js';
+// AIR-1 OSPREY, the Shores PD helicopter: it joins at three stars, hangs over
+// the chase with a lagging orbit, and pins its searchlight on the player —
+// which is why hiding stops working while it is overhead.
 
-export function createAirUnit() {
-  const unit = {
-    active: false,
-    x: 0,
-    y: 0,
-    angle: 0,
-    rotor: 0,
-    spotX: 0,
-    spotY: 0,
-    orbit: 0,
-  };
+import * as THREE from 'three';
+import { glowTexture } from './textures.js';
+import { dist2d } from './random.js';
 
-  /**
-   * One fixed step. The helicopter activates over the player at
-   * POLICE.heliMinWanted stars, hovers at a slow orbit offset from the
-   * player's position, and leaves the way it came when the heat dies.
-   */
-  function update(dt, { player, wanted }) {
-    unit.rotor += dt * 42;
-    if (wanted >= POLICE.heliMinWanted) {
-      if (!unit.active) {
-        unit.active = true;
-        unit.x = player.x + 700;
-        unit.y = player.y - 500;
-        unit.spotX = player.x;
-        unit.spotY = player.y;
+export function createAirUnit(scene) {
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1b1b24, metalness: 0.5, roughness: 0.4 });
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf2f0ea, metalness: 0.4, roughness: 0.4 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.7, 4.6), bodyMat); body.castShadow = true; g.add(body);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.04, 0.5, 4.64), whiteMat); stripe.position.y = -0.2; g.add(stripe);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 4.4), bodyMat); tail.position.set(0, 0.25, -4.2); g.add(tail);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.2, 0.8), bodyMat); fin.position.set(0, 0.7, -6.2); g.add(fin);
+  const rotor = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.05, 0.5), new THREE.MeshStandardMaterial({ color: 0x0c0c10 }));
+  rotor.position.y = 1.15; g.add(rotor);
+  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.4, 0.16), rotor.material);
+  tailRotor.position.set(0.2, 0.7, -6.2); g.add(tailRotor);
+  for (const s of [-1, 1]) {
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 3.4), bodyMat);
+    skid.position.set(s * 0.95, -1.15, 0); g.add(skid);
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.6, 0.1), bodyMat);
+    strut.position.set(s * 0.9, -0.75, 0.6); g.add(strut);
+  }
+  // searchlight: a real spotlight plus a visible cone and a pool of light
+  const spot = new THREE.SpotLight(0xcfe6ff, 900, 90, 0.32, 0.45, 1.2);
+  g.add(spot); g.add(spot.target);
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(6.4, 27, 20, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  cone.position.y = -14.2; g.add(cone);
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(5.6, 20),
+    new THREE.MeshBasicMaterial({ map: glowTexture('rgba(200,225,255,0.85)', 'rgba(200,225,255,0)'), transparent: true, depthWrite: false }));
+  pool.rotation.x = -Math.PI / 2; pool.position.y = 0.06;
+  scene.add(pool); scene.add(g);
+  g.position.set(320, 70, -320);
+
+  const heli = {
+    mesh: g, active: false, angle: 0,
+    update(dt, target, t) {
+      const want = target.stars >= 3;
+      this.active = want;
+      this.angle += dt * 0.24;
+      const orbit = 13;
+      const gx = want ? target.x + Math.sin(this.angle) * orbit : 320;
+      const gz = want ? target.z + Math.cos(this.angle) * orbit : -320;
+      const gy = want ? 27 : 70;
+      const k = 1 - Math.exp(-dt * (want ? 1.6 : 0.7));
+      g.position.x += (gx - g.position.x) * k;
+      g.position.z += (gz - g.position.z) * k;
+      g.position.y += (gy - g.position.y) * k;
+      g.rotation.y = Math.atan2(target.x - g.position.x, target.z - g.position.z);
+      rotor.rotation.y = t * 31; tailRotor.rotation.x = t * 40;
+      const lit = want && g.position.y < 40;
+      cone.visible = lit; pool.visible = lit;
+      spot.visible = lit;
+      if (lit) {
+        spot.position.set(0, -0.8, 0.8);
+        spot.target.position.set(target.x - g.position.x, -g.position.y, target.z - g.position.z);
+        pool.position.set(target.x, 0.06, target.z);
       }
-      unit.orbit += dt * 0.35;
-      const hoverX = player.x + Math.cos(unit.orbit) * 130;
-      const hoverY = player.y + Math.sin(unit.orbit) * 130 - 60;
-      unit.x += (hoverX - unit.x) * Math.min(1, dt * 1.6);
-      unit.y += (hoverY - unit.y) * Math.min(1, dt * 1.6);
-      unit.angle = Math.atan2(player.y - unit.y, player.x - unit.x);
-      // The spotlight tracks the player with a slight lag, like a real
-      // operator swinging the lamp to keep the car in the circle.
-      unit.spotX += (player.x - unit.spotX) * Math.min(1, dt * 5);
-      unit.spotY += (player.y - unit.spotY) * Math.min(1, dt * 5);
-      return;
-    }
-    if (unit.active) {
-      // Heat gone: climb away to the north-east and stand down once far.
-      unit.x += 620 * dt;
-      unit.y -= 460 * dt;
-      unit.spotX = unit.x;
-      unit.spotY = unit.y;
-      if (Math.hypot(unit.x - player.x, unit.y - player.y) > 1600) unit.active = false;
-    }
-  }
-
-  /** The panel row for this unit, in computePdResponse's extra format. */
-  function panelUnit(focus) {
-    const dist = Math.hypot(unit.x - focus.x, unit.y - focus.y);
-    return { name: 'AIR-1 OSPREY', status: 'AIR SUPPORT', distM: Math.round(dist / 10), dist };
-  }
-
-  /** Park the helicopter at an exact spot — the screenshot rig stages it. */
-  function stage(x, y, target) {
-    unit.active = true;
-    unit.x = x;
-    unit.y = y;
-    unit.angle = Math.atan2(target.y - y, target.x - x);
-    unit.spotX = target.x;
-    unit.spotY = target.y;
-    unit.rotor = 2.4;
-  }
-
-  function reset() {
-    unit.active = false;
-  }
-
-  return {
-    unit,
-    get active() {
-      return unit.active;
+      return lit && dist2d(g.position.x, g.position.z, target.x, target.z) < 95;
     },
-    update,
-    panelUnit,
-    stage,
-    reset,
+    unitForHud(target) {
+      return { name: 'AIR-1 OSPREY', status: 'AIR SUPPORT', dist: Math.round(dist2d(g.position.x, g.position.z, target.x, target.z)) };
+    },
   };
+  return heli;
 }

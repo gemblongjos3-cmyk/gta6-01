@@ -1,150 +1,58 @@
-// People on the pavements: they stroll their block, stop to look at the sea or a shop window, and
-// when a shot rings out or a car ploughs through them they PANIC and run, arms up, away from it.
-// Each one is a tiny state machine: walk, pause, flee; nothing touches the drawing code.
-import { COAST, PEDESTRIAN } from './config.js';
+// Pedestrians: evening crowds walking the block perimeters of Palm Shores.
+// They stroll, they chat in pairs, and they scatter when a car comes at them
+// too fast or a shot cracks out — the city has to feel inhabited to steal.
 
-const SHIRTS = ['#e4694f', '#4a8fc2', '#e8c05a', '#7cba6a', '#b58ad0', '#e08aaf', '#d5d0c4', '#3f4a5c'];
-const SKIN = ['#8a5a3c', '#c08a63', '#e0b48c', '#6b4230', '#f0cfae'];
+import * as THREE from 'three';
+import { rngPick, rngRange, dist2d } from './random.js';
 
-export function createPedestrians(world, random) {
-  const people = [];
+const COATS = [0xff8c42, 0x7fd4c1, 0xf6c6d8, 0x5b8def, 0xe8c547, 0xf2f0ea, 0x3fbf8f, 0xd94f70];
 
-  // Where the evening gathers: outside the diner, in front of the market,
-  // and along the docks boardwalk. Spawns and pauses lean toward these
-  // spots so the crowds cluster like real ones instead of scattering
-  // evenly over the whole map. Totals and reactions are unchanged.
-  const hotspots = [];
-  const diner = world.place('diner');
-  hotspots.push({ x: diner.door.x, y: diner.door.y });
-  const mart = (world.buildings ?? []).find((building) => building.name === 'Mango Mart');
-  if (mart) hotspots.push({ x: mart.x + mart.w / 2, y: mart.y + mart.h + 14 });
-  const warehouse = world.place('warehouse');
-  hotspots.push({ x: warehouse.door.x - 60, y: COAST.beachTop - 16 });
-
-  function spawnOne() {
-    let point;
-    if (random.chance(0.45)) {
-      const spot = random.pick(hotspots);
-      point = { x: spot.x + random.range(-90, 90), y: spot.y + random.range(-36, 36) };
-    } else {
-      point = world.clearPavementPoint();
-    }
-    const angle = random() * Math.PI * 2;
-    const person = {
-      x: point.x,
-      y: point.y,
-      angle,
-      speed: 0,
-      state: 'walk',
-      timer: random.range(1, 5),
-      panic: 0,
-      fleeX: 0,
-      fleeY: 0,
-      dead: false,
-      down: 0,
-      shirt: SHIRTS[Math.floor(random() * SHIRTS.length)],
-      skin: SKIN[Math.floor(random() * SKIN.length)],
-      hat: random.chance(0.2),
-      walkPhase: random() * Math.PI * 2,
-      hurt: 0,
+export function createPedestrians(scene, world, rng, count = 16) {
+  const peds = [];
+  for (let i = 0; i < count; i++) {
+    const g = new THREE.Group();
+    const coat = new THREE.MeshStandardMaterial({ color: rngPick(rng, COATS), roughness: 0.85 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.6, 0.22), coat); torso.position.y = 1.1; torso.castShadow = true; g.add(torso);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.24), new THREE.MeshStandardMaterial({ color: rngPick(rng, [0xf2b183, 0xc98a5e, 0x8a5a34, 0x6e4530]) })); head.position.y = 1.58; g.add(head);
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.78, 0.19), new THREE.MeshStandardMaterial({ color: 0x2a2733 })); legs.position.y = 0.4; g.add(legs);
+    scene.add(g);
+    const rect = world.blockRects[i % world.blockRects.length];
+    const ped = {
+      mesh: g, rect, edge: i % 4, u: rng(), speed: rngRange(rng, 1.1, 1.7),
+      fleeT: 0, fleeDir: 0, phase: rng() * 9,
     };
-    people.push(person);
-    return person;
+    peds.push(ped);
   }
-
-  for (let index = 0; index < PEDESTRIAN.count; index += 1) spawnOne();
-
-  /** Make everyone within `radius` of (x, y) run away from it for a while. */
-  function panicNear(x, y, radius, seconds = PEDESTRIAN.panicTime) {
-    let count = 0;
-    for (const person of people) {
-      if (person.dead) continue;
-      const dx = person.x - x;
-      const dy = person.y - y;
-      if (Math.hypot(dx, dy) > radius) continue;
-      const length = Math.hypot(dx, dy) || 1;
-      person.state = 'flee';
-      person.panic = seconds + random() * 1.5;
-      person.fleeX = dx / length;
-      person.fleeY = dy / length;
-      count += 1;
-    }
-    return count;
+  function rectPoint(rect, edge, u) {
+    const hw = rect.w / 2 - 1.2, hd = rect.d / 2 - 1.2;
+    if (edge === 0) return { x: rect.x - hw + u * hw * 2, z: rect.z - hd };
+    if (edge === 1) return { x: rect.x + hw, z: rect.z - hd + u * hd * 2 };
+    if (edge === 2) return { x: rect.x + hw - u * hw * 2, z: rect.z + hd };
+    return { x: rect.x - hw, z: rect.z + hd - u * hd * 2 };
   }
-
-  /** A person takes a hit: they fall, and everyone around them scatters. */
-  function fall(person) {
-    if (person.dead) return false;
-    person.dead = true;
-    person.state = 'down';
-    person.down = 0;
-    panicNear(person.x, person.y, 260);
-    return true;
-  }
-
-  function update(dt) {
-    for (const person of people) {
-      if (person.dead) {
-        person.down = Math.min(1, person.down + dt * 3);
-        continue;
+  return {
+    peds,
+    update(dt, t, threats) {
+      for (const ped of peds) {
+        const p = ped.mesh.position;
+        // scatter from fast cars and gunfire
+        if (ped.fleeT <= 0) for (const th of threats) {
+          if (dist2d(p.x, p.z, th.x, th.z) < th.r) { ped.fleeT = 1.6; ped.fleeDir = Math.atan2(p.x - th.x, p.z - th.z); break; }
+        }
+        if (ped.fleeT > 0) {
+          ped.fleeT -= dt;
+          p.x += Math.sin(ped.fleeDir) * dt * 5.4; p.z += Math.cos(ped.fleeDir) * dt * 5.4;
+          ped.mesh.rotation.y = ped.fleeDir;
+        } else {
+          ped.u += (ped.speed * dt) / (ped.rect.w + ped.rect.d);
+          if (ped.u >= 1) { ped.u = 0; ped.edge = (ped.edge + 1) % 4; }
+          const pt = rectPoint(ped.rect, ped.edge, ped.u);
+          const heading = Math.atan2(pt.x - p.x, pt.z - p.z);
+          p.x = pt.x; p.z = pt.z;
+          if (Math.abs(pt.x) > 0.01) ped.mesh.rotation.y = heading;
+        }
+        ped.mesh.position.y = Math.abs(Math.sin(t * 6.4 + ped.phase)) * 0.045;
       }
-      person.hurt = Math.max(0, person.hurt - dt);
-      person.timer -= dt;
-      if (person.state === 'flee') {
-        person.panic -= dt;
-        person.speed = PEDESTRIAN.runSpeed;
-        person.angle = Math.atan2(person.fleeY, person.fleeX);
-        if (person.panic <= 0) {
-          person.state = 'pause';
-          person.timer = random.range(1.5, 3.5);
-        }
-      } else if (person.state === 'pause') {
-        person.speed = 0;
-        if (person.timer <= 0) {
-          person.state = 'walk';
-          person.angle = random() * Math.PI * 2;
-          person.timer = random.range(2, 6);
-        }
-      } else {
-        // Walk: change direction now and then, and slow right down after a fright.
-        person.speed = PEDESTRIAN.walkSpeed * (person.panic > -8 ? 0.75 : 1);
-        if (person.timer <= 0) {
-          person.timer = random.range(1.5, 4);
-          // Near a hotspot people stop and linger — that is what makes a
-          // cluster a cluster instead of a passing coincidence.
-          const nearHotspot = hotspots.some((spot) => Math.hypot(spot.x - person.x, spot.y - person.y) < 260);
-          if (random.chance(nearHotspot ? 0.55 : 0.3)) {
-            person.state = 'pause';
-            person.speed = 0;
-          } else {
-            person.angle += random.range(-1.6, 1.6);
-          }
-        }
-        // Steer back toward the pavement when they wander into the road or the sea.
-        if (world.isOnRoad(person.x, person.y, 0) || person.y > COAST.beachTop) {
-          const toward = world.isOnRoad(person.x, person.y, 0) ? 'kerb' : 'beach';
-          if (toward === 'kerb') {
-            const spot = world.nearestRoadPoint(person.x, person.y, 90, 1);
-            person.angle = Math.atan2(spot.y - person.y, spot.x - person.x) + Math.PI;
-          } else {
-            person.angle = random.range(-Math.PI, 0);
-          }
-          person.state = 'walk';
-        }
-      }
-
-      const stepX = Math.cos(person.angle) * person.speed * dt;
-      const stepY = Math.sin(person.angle) * person.speed * dt;
-      const body = { x: person.x + stepX, y: person.y + stepY };
-      const blocked = world.resolveCircle(body, 9);
-      if (blocked) person.angle += random.range(-2.4, 2.4);
-      person.x = Math.max(10, Math.min(world.width - 10, body.x));
-      person.y = Math.max(10, Math.min(world.height - 10, body.y));
-      person.walkPhase += person.speed * dt * 0.14;
-    }
-  }
-
-  return { people, update, panicNear, fall, spawnOne };
+    },
+  };
 }
-
-// Round 5 note: pedestrians share the streets with roadblocks and the air unit spotlight now.

@@ -1,1058 +1,213 @@
-// The heads-up display: every DOM element the player reads at a glance.
-//
-// Canvas draws the world; this module owns the layer above it — wanted
-// stars, cash, health and ammo bars, the objective card, the mission tag,
-// the speedometer with its car-condition segments, the radio pill,
-// banners, toasts, hints, flashes, the start and pause panels, and the
-// radar minimap (a small canvas of its own).
-//
-// Motion belongs to GSAP. Every animated setter has two gears: the live
-// gear tweens, the static gear (setStatic(true), used by screenshot mode)
-// writes the end state with gsap.set so a photograph never catches a
-// half-finished animation.
-import { COAST, ROAD, WORLD } from './config.js';
-import { HALF_ROAD } from './world.js';
+// The HUD: DOM panels laid over the 3D view, styled after the reference the
+// crew works from — mission dossier top-left, Shores PD response under it,
+// cash and wanted stars top-right, a round minimap bottom-left, Luna's
+// dispatch dialogue bottom-centre, radio and the big speedometer bottom-right.
 
-/** World distance to the metres the HUD quotes: ten world pixels to a metre. */
-export function meters(worldDist) {
-  return Math.round(worldDist / 10);
-}
+import { WEAPONS, RADIO, UPGRADES, LUNA } from './config.js';
+import { formatTime } from './missions.js';
+import { lunaPortraitTexture } from './textures.js';
+import { XP_PER_LEVEL, xpIntoLevel } from './save.js';
+import { ROAD_CENTERS } from './city.js';
 
-/**
- * A route from `from` to `to` that follows the road grid, never a straight
- * line through the blocks: across to the nearest avenue, along it to the
- * street nearest the target, along that street to the target's avenue,
- * then along it to the target itself. Shared by live play (main.js) and
- * the staged screenshots (shots.js) so both draw the same honest path.
- */
-export function computeRoute(from, to) {
-  if (!from || !to) return null;
-  const nearest = (list, value) => list.reduce((best, item) => (Math.abs(item - value) < Math.abs(best - value) ? item : best), list[0]);
-  const avenueFrom = nearest(ROAD.avenueX, from.x);
-  const street = nearest(ROAD.streetY, to.y);
-  const avenueTo = nearest(ROAD.avenueX, to.x);
-  const points = [
-    { x: from.x, y: from.y },
-    { x: avenueFrom, y: from.y },
-    { x: avenueFrom, y: street },
-    { x: avenueTo, y: street },
-    { x: avenueTo, y: to.y },
-    { x: to.x, y: to.y },
-  ];
-  return points.filter((point, i) => i === 0 || point.x !== points[i - 1].x || point.y !== points[i - 1].y);
-}
+const $ = (id) => document.getElementById(id);
 
-// ------------------------------------------------------- Shores PD response
-// The response panel's honesty rule: every name, status and distance on it
-// is computed here from the actual police car objects in the scene, and
-// both live play (main.js) and the staged screenshots (shots.js) call this
-// one function, so a photographed panel can never disagree with the cars
-// a judge can count on screen.
-
-/** Unit callsigns, handed out in the order cars are first seen. */
-const PD_ROSTER = ['OSPREY-14', 'SANDPIPER-22', 'BONEFISH-08', 'KINGFISHER-06', 'PELICAN-19', 'HERON-27'];
-/** A car's callsign, keyed to the car object itself so it never changes. */
-const pdNames = new WeakMap();
-/** Each car's distance at the previous reading, for the closing trend. */
-const pdLastDist = new WeakMap();
-let pdNameCount = 0;
-
-function pdNameFor(car) {
-  let name = pdNames.get(car);
-  if (name) return name;
-  const index = pdNameCount;
-  pdNameCount += 1;
-  const cycle = Math.floor(index / PD_ROSTER.length);
-  name = PD_ROSTER[index % PD_ROSTER.length] + (cycle > 0 ? String.fromCharCode(64 + cycle) : '');
-  pdNames.set(car, name);
-  return name;
-}
-
-/**
- * One unit's status, derived geometrically — police.js gives every cruiser
- * the same chase behaviour and keeps no per-unit mode, so the panel reads
- * the geometry instead: where the unit sits against the player's heading,
- * how fast it is rolling, how far it is, and whether that distance shrank
- * since the last reading.
- *   ROADBLOCK  ahead of the player's heading, slow or stopped, not far
- *   INTERCEPT  ahead of the heading and rolling — moving to cut across
- *   PURSUIT    close (within ~52 m), wherever it sits: it is on the player
- *   CLOSING    farther out but converging (or rolling toward the player)
- *   PATROL     no heat, or a far unit that is opening, not closing
- */
-function pdStatusFor(car, focus, wanted, dist) {
-  if (wanted <= 0) return 'PATROL';
-  const last = pdLastDist.get(car);
-  const closing = last === undefined ? true : dist <= last + 2;
-  pdLastDist.set(car, dist);
-  const ahead = Math.cos(focus.heading) * (car.x - focus.x) + Math.sin(focus.heading) * (car.y - focus.y);
-  const aheadDot = dist > 0 ? ahead / dist : 0;
-  const speed = Math.abs(car.speed ?? 0);
-  if (aheadDot > 0.35 && dist < 700) return speed < 40 ? 'ROADBLOCK' : 'INTERCEPT';
-  if (dist < 300 && closing && speed > 200) return 'RAMMING';
-  if (dist < 520) return 'PURSUIT';
-  if (dist < 1200 && (closing || speed >= 40)) return 'CLOSING';
-  if (dist < 1200) return 'PATROL';
-  return 'CLOSING';
-}
-
-/**
- * The whole panel from the real car list: `{ count, sight, rows }` with the
- * nearest units first, at most five rows. Returns null when the panel
- * should hide — no units at all, or no heat and nothing near. IN SIGHT is
- * derived, not stored: wanted above zero AND the nearest unit within
- * 900 world px (90 m) of the player.
- */
-export function computePdResponse(cars, focus, wanted, extraUnits = []) {
-  const list = (cars ?? []).filter((car) => car && car.kind === 'police');
-  const extras = (extraUnits ?? []).filter((unit) => unit && unit.name);
-  if ((list.length === 0 && extras.length === 0) || !focus) return null;
-  // Names are assigned in first-seen (spawn) order before any sorting, so
-  // the nearest-first display order can never rename a car.
-  for (const car of list) pdNameFor(car);
-  const rows = list
-    .map((car) => {
-      const dist = Math.hypot(car.x - focus.x, car.y - focus.y);
-      return { name: pdNames.get(car), status: pdStatusFor(car, focus, wanted, dist), distM: meters(dist), dist };
-    })
-    .concat(extras.map((unit) => ({ name: unit.name, status: unit.status, distM: unit.distM, dist: unit.dist })))
-    .sort((a, b) => a.dist - b.dist);
-  const nearest = rows[0].dist;
-  if (wanted <= 0 && nearest > 900) return null;
-  const shown = rows.slice(0, 5);
-  return {
-    count: list.length + extras.length,
-    code: Math.max(0, Math.round(wanted)),
-    sight: wanted > 0 && nearest <= 900,
-    more: rows.length - shown.length,
-    rows: shown.map(({ name, status, distM }) => ({ name, status, distM })),
+export function createHud(callbacks) {
+  const els = {
+    mission: $('missionPanel'), mpHead: $('mpHead'), mpTimer: $('mpTimer'), mpObjective: $('mpObjective'),
+    mpSub: $('mpSub'), mpStage: $('mpStage'), mpBar: $('mpBar'), mpNext: $('mpNext'), mpDistrict: $('mpDistrict'),
+    pd: $('pdPanel'), pdHead: $('pdHead'), pdUnits: $('pdUnits'), pdFoot: $('pdFoot'), pdSight: $('pdSight'),
+    clock: $('clockLine'), cash: $('cash'), stars: $('stars'), slots: $('weaponSlots'), ammo: $('ammoLine'),
+    district: $('districtChip'), respectFill: $('respectFill'), respectLabel: $('respectLabel'),
+    xpFill: $('xpFill'), xpLabel: $('xpLabel'), healthFill: $('healthFill'),
+    dlg: $('dialogue'), dlgText: $('dlgText'), dlgName: $('dlgName'), dlgImg: $('dlgPortrait'),
+    radio: $('radioPanel'), radioFreq: $('radioFreq'), radioTrack: $('radioTrack'),
+    veh: $('vehPanel'), vehName: $('vehName'), vehCond: $('vehCondFill'), speedo: $('speedoNum'), gear: $('gearLabel'),
+    prompt: $('prompt'), toast: $('toast'), wheel: $('wheel'), busted: $('bustedWrap'), bustedFill: $('bustedFill'),
+    minimap: $('minimap'), start: $('startScreen'), garage: $('garageMenu'),
   };
-}
+  els.dlgImg.src = lunaPortraitTexture().image.toDataURL();
+  els.dlgName.textContent = LUNA;
+  let dlgTimer = 0, toastTimer = 0;
+  const mm = els.minimap.getContext('2d');
 
-/** Grab one element by id; a missing id is a markup bug, so say so loudly. */
-function byId(id) {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`HUD element #${id} is missing from index.html`);
-  return node;
-}
-
-export function createHud(world) {
-  const el = {
-    root: byId('hud'),
-    wanted: byId('wanted'),
-    stars: [...document.querySelectorAll('#wanted .star')],
-    cashAmount: byId('cashAmount'),
-    healthBar: byId('healthBar'),
-    healthFill: document.querySelector('#healthBar > i'),
-    ammoBar: byId('ammoBar'),
-    ammoFill: document.querySelector('#ammoBar > i'),
-    weapon: byId('weapon'),
-    ammoCount: byId('ammoCount'),
-    objective: byId('objective'),
-    objectiveTitle: byId('objectiveTitle'),
-    objectiveText: byId('objectiveText'),
-    objectiveTimer: byId('objectiveTimer'),
-    missionTag: byId('missionTag'),
-    rail: byId('rail'),
-    dossier: byId('dossier'),
-    dossierHead: byId('dossierHead'),
-    dossierObj: byId('dossierObj'),
-    dossierSub: byId('dossierSub'),
-    dossierStage: byId('dossierStage'),
-    dossierStageLabel: byId('dossierStageLabel'),
-    dossierNext: byId('dossierNext'),
-    dossierTimer: byId('dossierTimer'),
-    dossierDistrict: byId('dossierDistrict'),
-    pdPanel: byId('pdPanel'),
-    pdTitle: byId('pdTitle'),
-    pdChip: byId('pdChip'),
-    pdRows: byId('pdRows'),
-    pdFoot: byId('pdFoot'),
-    dayClock: byId('dayClock'),
-    progress: byId('progress'),
-    respectLabel: byId('respectLabel'),
-    respectFill: document.querySelector('#respectBar > i'),
-    xpLabel: byId('xpLabel'),
-    xpFill: document.querySelector('#xpBar > i'),
-    weaponSlots: byId('weaponSlots'),
-    wheel: byId('wheel'),
-    speedGear: byId('speedGear'),
-    carCondPct: byId('carCondPct'),
-    dialogue: byId('dialogue'),
-    dialogueText: byId('dialogueText'),
-    radarLabel: byId('radarLabel'),
-    speedo: byId('speedo'),
-    speedValue: byId('speedValue'),
-    carName: byId('carName'),
-    carCond: byId('carCond'),
-    carCondSegs: [...document.querySelectorAll('#carCond .seg')],
-    radio: byId('radio'),
-    radioStation: byId('radioStation'),
-    radioTrack: byId('radioTrack'),
-    banner: byId('banner'),
-    bannerBig: byId('bannerBig'),
-    bannerSmall: byId('bannerSmall'),
-    toast: byId('toast'),
-    hint: byId('hint'),
-    flash: byId('flash'),
-    canvas: byId('game'),
-    minimap: byId('minimap'),
-    start: byId('start'),
-    startPanel: byId('startPanel'),
-    pause: byId('pause'),
-    pausePanel: byId('pausePanel'),
-    title: byId('title'),
-    status: byId('status'),
-  };
-  const radarCtx = el.minimap.getContext('2d');
-
-  const hasGsap = typeof window !== 'undefined' && Boolean(window.gsap);
-  const gsap = hasGsap ? window.gsap : null;
-
-  let staticMode = false;
-  let lastWanted = 0;
-  let lastCash = null;
-  let bannerTimeline = null;
-  let toastTimeline = null;
-  let entranceTimeline = null;
-  // The left rail: active during play (and in the staged action shots),
-  // where it replaces the old objective card and mission tag outright.
-  let railActive = false;
-  let dossierState = null; // merged dossier fields, rendered on change only
-  let dossierKey = '';
-  let pdKey = '';
-  let sayQueue = [];
-  let sayTimeline = null;
-
-  /** Run a tween, or jump straight to its end state in static mode. */
-  function animate(targets, vars) {
-    if (!gsap) return null;
-    if (staticMode) {
-      gsap.set(targets, vars);
-      return null;
-    }
-    return gsap.to(targets, vars);
-  }
-
-  /** Switch every setter between tweened (play) and set (photograph). */
-  function setStatic(value) {
-    staticMode = Boolean(value);
-    if (staticMode && gsap) gsap.globalTimeline.timeScale(1000);
-    else if (gsap) gsap.globalTimeline.timeScale(1);
-  }
-
-  // ------------------------------------------------------------- the stars
-  /**
-   * Light `level` of the five stars. A rise earns a pulse — the whole row
-   * swells and settles — because a new star should feel like bad news.
-   */
-  function setWanted(level) {
-    const clamped = Math.max(0, Math.min(5, Math.round(level)));
-    el.stars.forEach((star, i) => star.classList.toggle('lit', i < clamped));
-    el.wanted.setAttribute('aria-label', `Wanted level ${clamped} of 5`);
-    if (gsap && clamped > lastWanted && clamped > 0) {
-      if (staticMode) {
-        gsap.set(el.stars, { scale: 1 });
-      } else {
-        gsap.fromTo(
-          el.stars,
-          { scale: 1 },
-          { scale: 1.35, duration: 0.16, ease: 'power2.out', yoyo: true, repeat: 1, stagger: 0.045, overwrite: 'auto' },
-        );
-      }
-    }
-    lastWanted = clamped;
-  }
-
-  // -------------------------------------------------------------- the wallet
-  /** Cash, counted with a quick roll when it changes during play. */
-  function setCash(amount) {
-    const value = Math.max(0, Math.round(amount));
-    if (lastCash === value) return;
-    const from = lastCash ?? value;
-    lastCash = value;
-    if (!gsap || staticMode || from === value) {
-      el.cashAmount.textContent = `$${value.toLocaleString('en-US')}`;
-      return;
-    }
-    const counter = { shown: from };
-    gsap.to(counter, {
-      shown: value,
-      duration: 0.45,
-      ease: 'power1.out',
-      overwrite: 'auto',
-      onUpdate: () => {
-        el.cashAmount.textContent = `$${Math.round(counter.shown).toLocaleString('en-US')}`;
-      },
-    });
-  }
-
-  // -------------------------------------------------------------- the vitals
-  /** Health as a bar that turns angry red when it runs low. */
-  function setHealth(value, max = 100) {
-    const pct = Math.max(0, Math.min(100, (value / max) * 100));
-    el.healthFill.style.width = `${pct}%`;
-    el.healthBar.classList.toggle('low', pct <= 30);
-  }
-
-  /** Ammo: the bar is the magazine against its reserve, the numbers exact. */
-  function setAmmo(loaded, reserve, magazine = 12) {
-    const pct = Math.max(0, Math.min(100, (loaded / magazine) * 100));
-    // The stylesheet colours only the health fill; the ammo fill gets its
-    // brass gradient here, and turns red when the magazine runs dry.
-    el.ammoFill.style.background = loaded > 0
-      ? 'linear-gradient(90deg, #d8a84e, #f0d089)'
-      : 'linear-gradient(90deg, #ff4f4f, #ff9a5a)';
-    el.ammoFill.style.width = `${pct}%`;
-    el.ammoCount.textContent = `${loaded} / ${reserve}`;
-  }
-
-  /** Name the held weapon next to its ammo count. */
-  function setWeapon(name) {
-    const label = el.weapon.firstChild;
-    if (label) label.textContent = `${name} · `;
-  }
-
-  // ------------------------------------------------------------ the objective
-  /**
-   * Show the objective card; a repeat of the same text just updates it.
-   * While the rail is active the card itself stays hidden and the same
-   * values feed the dossier instead — the rail shows them better.
-   */
-  function setObjective(title, text, timer = '') {
-    el.objectiveTitle.textContent = title;
-    el.objectiveText.textContent = text;
-    el.objectiveTimer.textContent = timer ?? '';
-    el.objectiveTimer.classList.toggle('late', typeof timer === 'string' && timer.startsWith('0:'));
-    if (railActive) {
-      mergeDossier({ header: title, objective: text, timer: timer ?? '' });
-      return;
-    }
-    animate(el.objective, { autoAlpha: 1, y: 0, duration: 0.35, ease: 'power2.out' });
-  }
-
-  /** Slide the objective card away when there is nothing to chase. */
-  function hideObjective() {
-    animate(el.objective, { autoAlpha: 0, y: -8, duration: 0.3, ease: 'power2.in' });
-    if (railActive) {
-      dossierState = null;
-      dossierKey = '';
-      animate(el.dossier, { autoAlpha: 0, x: -10, duration: 0.3, ease: 'power2.in' });
-    }
-  }
-
-  /** The small gold tag naming where the mission is happening. */
-  function setMissionTag(text) {
-    el.missionTag.textContent = text ?? '';
-    if (railActive) {
-      // The tag element stays hidden in play; its text lives on as the
-      // dossier's district line.
-      mergeDossier({ district: text ?? '' });
-      return;
-    }
-    animate(el.missionTag, { autoAlpha: text ? 1 : 0, duration: 0.3 });
-  }
-
-  // ------------------------------------------------------------- the rail
-  /**
-   * Switch the rail on (play, staged action shots) or off (start screen).
-   * Off also folds every rail card away so nothing lingers over the title.
-   */
-  function setRailActive(value) {
-    railActive = Boolean(value);
-    if (!railActive) {
-      dossierState = null;
-      dossierKey = '';
-      pdKey = '';
-      sayQueue = [];
-      if (sayTimeline) sayTimeline.kill();
-      sayTimeline = null;
-      if (gsap) gsap.set([el.dossier, el.pdPanel, el.dialogue, el.objective, el.missionTag], { autoAlpha: 0 });
-    }
-  }
-
-  /** Write the merged dossier state to the DOM, only when it changed. */
-  function renderDossier() {
-    if (!dossierState) return;
-    const d = dossierState;
-    const key = [d.header, d.objective, d.sub, d.stageFilled, d.stageTotal, d.stageIndex, d.next, d.timer, d.district].join('|');
-    if (key === dossierKey) return;
-    dossierKey = key;
-    el.dossierHead.textContent = d.header ?? '';
-    el.dossierObj.textContent = d.objective ?? '';
-    el.dossierSub.textContent = d.sub ?? '';
-    el.dossierTimer.textContent = d.timer ?? '';
-    el.dossierTimer.classList.toggle('late', typeof d.timer === 'string' && d.timer.startsWith('0:'));
-    const total = Math.max(0, Math.round(d.stageTotal ?? 0));
-    const filled = Math.max(0, Math.min(total, Math.round(d.stageFilled ?? 0)));
-    const current = d.stageIndex === undefined ? filled : Math.max(0, Math.min(total - 1, Math.round(d.stageIndex)));
-    el.dossierStage.innerHTML = '';
-    for (let i = 0; i < total; i += 1) {
-      const seg = document.createElement('i');
-      if (i < filled) seg.className = 'done';
-      else if (i === current) seg.className = 'now';
-      el.dossierStage.appendChild(seg);
-    }
-    el.dossierStageLabel.textContent = total > 0 ? `STAGE ${current + 1}/${total}` : '';
-    el.dossierNext.innerHTML = '';
-    if (d.next) {
-      const lead = document.createElement('span');
-      lead.textContent = 'NEXT: ';
-      const value = document.createElement('b');
-      value.textContent = d.next;
-      el.dossierNext.append(lead, value);
-    }
-    el.dossierDistrict.textContent = d.district ?? '';
-    animate(el.dossier, { autoAlpha: 1, x: 0, duration: 0.35, ease: 'power2.out' });
-  }
-
-  /** Fold partial values (from setObjective / setMissionTag) into the dossier. */
-  function mergeDossier(partial) {
-    dossierState = { ...(dossierState ?? {}), ...partial };
-    renderDossier();
-  }
-
-  /**
-   * The mission dossier, whole: header (`NAME · MISSION i OF 6`), objective
-   * text, the stage bar (stageFilled of stageTotal segments filled, the
-   * stageIndex segment half-lit), the NEXT line, the timer and the
-   * district. Null hides the card.
-   */
-  function setDossier(data) {
-    if (!data) {
-      dossierState = null;
-      dossierKey = '';
-      animate(el.dossier, { autoAlpha: 0, x: -10, duration: 0.3, ease: 'power2.in' });
-      return;
-    }
-    dossierState = { ...(dossierState ?? {}), ...data };
-    renderDossier();
-  }
-
-  /**
-   * The Shores PD response panel from computePdResponse's reading of the
-   * real cruisers: a unit count, the IN SIGHT / EVADING chip, and one row
-   * per unit — callsign, status chip, true distance in metres. Null hides.
-   */
-  function setResponse(data) {
-    if (!data) {
-      pdKey = '';
-      animate(el.pdPanel, { autoAlpha: 0, x: -10, duration: 0.3, ease: 'power2.in' });
-      return;
-    }
-    const key = [data.count, data.code, data.sight, data.more, ...data.rows.map((row) => `${row.name}:${row.status}:${row.distM}`)].join('|');
-    if (key === pdKey) return;
-    pdKey = key;
-    el.pdTitle.textContent = `SHORES PD RESPONSE — ${data.count} ${data.count === 1 ? 'UNIT' : 'UNITS'}${data.code ? ` • CODE ${data.code}` : ''}`;
-    el.pdChip.textContent = data.sight ? 'IN SIGHT' : 'EVADING';
-    el.pdChip.className = `chip ${data.sight ? 'sight' : 'evade'}`;
-    el.pdRows.innerHTML = '';
-    for (const row of data.rows) {
-      const line = document.createElement('div');
-      line.className = 'row';
-      const unit = document.createElement('span');
-      unit.className = 'unit';
-      unit.textContent = row.name;
-      const chip = document.createElement('span');
-      chip.className = `chip ${row.status.toLowerCase()}`;
-      chip.textContent = row.status;
-      const dist = document.createElement('span');
-      dist.className = 'dist';
-      dist.textContent = `${row.distM} m`;
-      line.append(unit, chip, dist);
-      el.pdRows.appendChild(line);
-    }
-    el.pdFoot.textContent = data.more > 0 ? `+${data.more} more ${data.more === 1 ? 'unit' : 'units'} on Tac-3 — break line of sight` : '';
-    animate(el.pdPanel, { autoAlpha: 1, x: 0, duration: 0.35, ease: 'power2.out' });
-  }
-
-  /**
-   * Luna speaks: a line on the dispatch strip. In play the lines queue and
-   * each holds for about six seconds; in static mode the latest line is
-   * simply pinned, final, for the photograph.
-   */
-  function say(text) {
-    if (!text) return;
-    if (staticMode || !gsap) {
-      el.dialogueText.textContent = text;
-      if (gsap) gsap.set(el.dialogue, { autoAlpha: 1, x: 0 });
-      else el.dialogue.style.opacity = '1';
-      return;
-    }
-    sayQueue.push(text);
-    if (sayTimeline) return;
-    const next = () => {
-      const line = sayQueue.shift();
-      if (line === undefined) {
-        sayTimeline = null;
+  const hud = {
+    els,
+    showStart(save, story) {
+      els.start.style.display = 'flex';
+      $('startStory').innerHTML = story.map(l => `<div>${l}</div>`).join('');
+      $('btnContinue').style.display = save.started ? 'block' : 'none';
+      $('btnNew').textContent = save.started ? 'NEW GAME' : 'START — DAY 1';
+    },
+    hideStart() { els.start.style.display = 'none'; },
+    say(text, name = LUNA) {
+      els.dlg.style.opacity = '1';
+      els.dlgName.textContent = name;
+      els.dlgText.textContent = text;
+      dlgTimer = 7;
+    },
+    toast(text, sub = '') {
+      els.toast.innerHTML = text + (sub ? `<div class="toast-sub">${sub}</div>` : '');
+      els.toast.style.opacity = '1'; toastTimer = 3.2;
+    },
+    prompt(text) {
+      els.prompt.style.opacity = text ? '1' : '0';
+      if (text) els.prompt.textContent = text;
+    },
+    setCash(v) { els.cash.textContent = '$' + Math.round(v).toLocaleString('en-US'); },
+    setClock(minutes, day) {
+      const h = Math.floor(minutes / 60) % 24, m = Math.floor(minutes % 60);
+      els.clock.textContent = `DAY ${day} · ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    },
+    setStars(n) {
+      els.stars.innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="star ${i <= n ? 'on' : ''}">★</span>`).join('');
+    },
+    setProgress(xp, respect) {
+      els.respectLabel.textContent = 'RESPECT ' + respect;
+      els.respectFill.style.width = ((respect - 1) / 8 * 100) + '%';
+      els.xpLabel.textContent = xpIntoLevel(xp) + '/' + XP_PER_LEVEL;
+      els.xpFill.style.width = (xpIntoLevel(xp) / XP_PER_LEVEL * 100) + '%';
+    },
+    setHealth(v) { els.healthFill.style.width = Math.max(0, v) + '%'; },
+    setBusted(frac) {
+      els.busted.style.opacity = frac > 0.02 ? '1' : '0';
+      els.bustedFill.style.width = (frac * 100) + '%';
+    },
+    setMission(obj, districtName) {
+      els.mpDistrict.textContent = districtName;
+      if (!obj) {
+        els.mpHead.textContent = 'PALM SHORES — FREE ROAM';
+        els.mpObjective.textContent = 'The gold beacon at Bayline Garage has your next job.';
+        els.mpSub.textContent = 'Sunset Stars, parked cars and trouble are all yours meanwhile.';
+        els.mpStage.textContent = ''; els.mpNext.textContent = '';
+        els.mpTimer.textContent = ''; els.mpBar.innerHTML = '';
         return;
       }
-      el.dialogueText.textContent = line;
-      sayTimeline = gsap.timeline({ onComplete: next });
-      sayTimeline
-        .fromTo(el.dialogue, { autoAlpha: 0, x: -10 }, { autoAlpha: 1, x: 0, duration: 0.3, ease: 'power2.out' })
-        .to(el.dialogue, { autoAlpha: 1, duration: 6 })
-        .to(el.dialogue, { autoAlpha: 0, x: -8, duration: 0.4, ease: 'power2.in' });
-    };
-    next();
-  }
-
-  /** The district name centred under the radar disc. */
-  function setDistrict(text) {
-    el.radarLabel.textContent = text ?? '';
-  }
-
-  // ----------------------------------------------------------- the speedometer
-  /** Speed while driving; the whole cluster hides itself on foot. */
-  function setSpeed(value, name, driving, gear = '') {
-    if (!driving) {
-      animate(el.speedo, { autoAlpha: 0, y: 8, duration: 0.25 });
-      return;
-    }
-    el.speedValue.textContent = `${Math.round(Math.abs(value))}`;
-    el.speedGear.textContent = gear ?? '';
-    el.carName.textContent = name ?? '';
-    animate(el.speedo, { autoAlpha: 1, y: 0, duration: 0.25 });
-  }
-
-  /**
-   * The car's condition as four segments under its name: a quarter of the
-   * health lights one block, and the last block standing burns red. The
-   * exact percentage rides beside the segments.
-   */
-  function setCarCondition(health, maxHealth) {
-    const max = maxHealth > 0 ? maxHealth : 1;
-    const frac = Math.max(0, Math.min(1, health / max));
-    const lit = Math.ceil(4 * frac);
-    el.carCondSegs.forEach((seg, i) => seg.classList.toggle('lit', i < lit));
-    el.carCond.classList.toggle('low', lit <= 1);
-    el.carCondPct.textContent = `${Math.round(frac * 100)}%`;
-  }
-
-  // ------------------------------------------------- clock and progress
-  /** The evening's clock, top right over the cash: DAY 1 · 18:52. */
-  function setClock(text) {
-    el.dayClock.textContent = text ?? '';
-  }
-
-  /**
-   * The standing bars under the radar: RESPECT (the level the city grants
-   * for work done) and XP filling toward the next one.
-   */
-  function setProgress({ respect = 1, xp = 0, xpNext = 150 } = {}) {
-    if (gsap) gsap.set(el.progress, { autoAlpha: 1 });
-    el.respectLabel.textContent = `RESPECT ${respect}`;
-    el.respectFill.style.width = `${Math.max(0, Math.min(100, (respect / 8) * 100))}%`;
-    el.xpLabel.textContent = `XP ${xp}/${xpNext}`;
-    el.xpFill.style.width = `${Math.max(0, Math.min(100, (xp / Math.max(1, xpNext)) * 100))}%`;
-  }
-
-  // ---------------------------------------------------- weapons display
-  let slotsKey = '';
-  /**
-   * The weapon slot strip under the stars of the top-right cluster: one
-   * slot per weapon in the arsenal, the held one lit, the unearned ones
-   * stamped LOCKED with the model name the player is working toward.
-   */
-  function setWeaponSlots(states) {
-    const key = (states ?? []).map((s) => `${s.def.model}:${s.unlocked ? 1 : 0}:${s.active ? 1 : 0}`).join('|');
-    if (key === slotsKey) return;
-    slotsKey = key;
-    if (gsap) gsap.set(el.weaponSlots, { autoAlpha: 1 });
-    el.weaponSlots.innerHTML = '';
-    for (const state of states ?? []) {
-      const slot = document.createElement('div');
-      slot.className = `slot${state.active ? ' active' : ''}${state.unlocked ? '' : ' locked'}`;
-      const model = document.createElement('span');
-      model.className = 'smodel';
-      model.textContent = state.def.model;
-      const tag = document.createElement('span');
-      tag.className = 'stag';
-      tag.textContent = state.unlocked ? state.def.name.toUpperCase() : 'LOCKED';
-      slot.append(model, tag);
-      el.weaponSlots.appendChild(slot);
-    }
-  }
-
-  let wheelOpen = false;
-  /**
-   * The weapon wheel: the arsenal arranged around a ring while Q is held.
-   * The segment under the pointer (or the held weapon, in a photograph)
-   * burns gold; locked segments stay dim with their LOCKED stamp.
-   */
-  function showWheel(states, selected = 0) {
-    wheelOpen = true;
-    el.wheel.innerHTML = '';
-    (states ?? []).forEach((state, i) => {
-      const seg = document.createElement('div');
-      seg.className = `wseg seg${i}${i === selected ? ' picked' : ''}${state.unlocked ? '' : ' locked'}`;
-      const model = document.createElement('div');
-      model.className = 'wmodel';
-      model.textContent = state.def.model;
-      const name = document.createElement('div');
-      name.className = 'wname';
-      name.textContent = state.unlocked ? state.def.name : 'LOCKED';
-      const ammo = document.createElement('div');
-      ammo.className = 'wammo';
-      ammo.textContent = state.unlocked ? `${state.mag} / ${state.reserve}` : '—';
-      seg.append(model, name, ammo);
-      el.wheel.appendChild(seg);
-    });
-    animate(el.wheel, { autoAlpha: 1, scale: 1, duration: 0.18, ease: 'power2.out' });
-  }
-
-  /** Fold the wheel away: the choice is made. */
-  function hideWheel() {
-    if (!wheelOpen) return;
-    wheelOpen = false;
-    animate(el.wheel, { autoAlpha: 0, scale: 0.94, duration: 0.15, ease: 'power2.in' });
-  }
-
-  // ------------------------------------------------------------------ radio
-  /** The radio pill: station on the left, the track playing, three EQ bars. A null station hides the pill (on foot, there is no radio). */
-  function setRadio(station, title, artist) {
-    if (!station) {
-      animate(el.radio, { autoAlpha: 0, y: 8, duration: 0.3 });
-      return;
-    }
-    el.radioStation.textContent = station ?? '';
-    el.radioTrack.textContent = `'${title}' — ${artist}`;
-    animate(el.radio, { autoAlpha: 1, y: 0, duration: 0.3 });
-  }
-
-  // ---------------------------------------------------------------- banners
-  /**
-   * The big centre banner — MISSION PASSED, BUSTED, WASTED — as one GSAP
-   * timeline: punch in, hold, drift out. endBanner cuts it short.
-   */
-  function banner(big, small = '', kind = '') {
-    el.bannerBig.textContent = big;
-    el.bannerSmall.textContent = small;
-    el.banner.className = kind;
-    el.banner.id = 'banner';
-    if (!gsap) {
-      el.banner.style.opacity = '1';
-      return;
-    }
-    if (bannerTimeline) bannerTimeline.kill();
-    if (staticMode) {
-      gsap.set(el.banner, { autoAlpha: 1, scale: 1 });
-      return;
-    }
-    bannerTimeline = gsap.timeline();
-    bannerTimeline
-      .fromTo(el.banner, { autoAlpha: 0, scale: 1.24 }, { autoAlpha: 1, scale: 1, duration: 0.32, ease: 'power3.out' })
-      .to(el.banner, { autoAlpha: 1, duration: 1.5 })
-      .to(el.banner, { autoAlpha: 0, scale: 0.96, duration: 0.45, ease: 'power2.in' });
-  }
-
-  /** Hide the banner now, whatever its timeline was doing. */
-  function endBanner() {
-    if (bannerTimeline) bannerTimeline.kill();
-    bannerTimeline = null;
-    if (gsap) gsap.set(el.banner, { autoAlpha: 0 });
-    else el.banner.style.opacity = '0';
-  }
-
-  // ----------------------------------------------------------------- toasts
-  /** A one-line message pill near the bottom; newer replaces older. */
-  function toast(message, seconds = 2.6) {
-    if (!message) {
-      if (toastTimeline) toastTimeline.kill();
-      if (gsap) gsap.set(el.toast, { autoAlpha: 0 });
-      return;
-    }
-    el.toast.textContent = message;
-    el.status.textContent = message;
-    if (!gsap) {
-      el.toast.style.opacity = '1';
-      return;
-    }
-    if (toastTimeline) toastTimeline.kill();
-    if (staticMode) {
-      gsap.set(el.toast, { autoAlpha: 1, y: 0 });
-      return;
-    }
-    toastTimeline = gsap.timeline();
-    toastTimeline
-      .fromTo(el.toast, { autoAlpha: 0, y: 10 }, { autoAlpha: 1, y: 0, duration: 0.28, ease: 'power2.out' })
-      .to(el.toast, { autoAlpha: 0, duration: 0.4, ease: 'power1.in' }, `+=${Math.max(0.4, seconds)}`);
-  }
-
-  /** The quiet hint line under the toast; empty text hides it. */
-  function hint(text) {
-    el.hint.textContent = text ?? '';
-    animate(el.hint, { autoAlpha: text ? 1 : 0, duration: 0.25 });
-  }
-
-  // ---------------------------------------------------------------- effects
-  /** A full-screen colour wash: blue for the law, red for the hurt. */
-  function flash(kind) {
-    el.flash.className = kind === 'blue' ? 'blue' : 'red';
-    el.flash.id = 'flash';
-    if (!gsap) return;
-    if (staticMode) {
-      gsap.set(el.flash, { opacity: 0.85 });
-      return;
-    }
-    gsap.fromTo(el.flash, { opacity: 0.9 }, { opacity: 0, duration: 0.7, ease: 'power2.out', overwrite: 'auto' });
-  }
-
-  /** Shake the whole game view — collisions and nearby gunfire live here. */
-  function shake(amount = 6) {
-    if (!gsap || staticMode) return;
-    const strength = Math.max(2, Math.min(14, amount));
-    gsap.fromTo(
-      el.canvas,
-      { x: -strength, y: strength * 0.6 },
-      { x: 0, y: 0, duration: 0.32, ease: 'elastic.out(1, 0.35)', overwrite: 'auto' },
-    );
-  }
-
-  /** A smaller, sharper jolt for a single hit landing on the player. */
-  function jolt() {
-    if (!gsap || staticMode) return;
-    gsap.fromTo(el.root, { x: -3 }, { x: 0, duration: 0.18, ease: 'power2.out', overwrite: 'auto' });
-  }
-
-  // ------------------------------------------------------------------ radar
-  /**
-   * The minimap: a 200px circle of city centred on the player. Roads and
-   * the shoreline give the geography; dots give the life — traffic in grey,
-   * police in blue, the objective in gold, the player as a white arrow.
-   * state: { x, y, aim, marker, traffic, police, blink }
-   */
-  function drawRadar(state) {
-    const g = radarCtx;
-    const size = el.minimap.width || 200;
-    const half = size / 2;
-    const range = 1150; // world pixels from centre to rim
-    const scale = half / range;
-    const px = state.x;
-    const py = state.y;
-
-    g.clearRect(0, 0, size, size);
-    g.save();
-    g.beginPath();
-    g.arc(half, half, half - 1, 0, Math.PI * 2);
-    g.clip();
-
-    g.fillStyle = '#4c7350';
-    g.fillRect(0, 0, size, size);
-    // Sea along the bottom of the world, wherever the view reaches it.
-    const seaY = half + (COAST.waterline - py) * scale;
-    if (seaY < size) {
-      g.fillStyle = '#2f7f8c';
-      g.fillRect(0, Math.max(0, seaY), size, size - Math.max(0, seaY));
-    }
-    const sandY = half + (COAST.beachTop - py) * scale;
-    if (sandY < size && seaY > 0) {
-      g.fillStyle = '#cfae7a';
-      g.fillRect(0, Math.max(0, sandY), size, Math.max(0, Math.min(size, seaY) - Math.max(0, sandY)));
-    }
-    // Building footprints first, so the map reads as a city of blocks and not an empty
-    // green grid: every roof in range as a dark slate slab under the road lines.
-    g.fillStyle = 'rgba(26,32,30,0.6)';
-    for (const b of world.buildings ?? []) {
-      const bx = half + (b.x - px) * scale;
-      const by = half + (b.y - py) * scale;
-      const bw = b.w * scale;
-      const bh = b.h * scale;
-      if (bx + bw < 0 || by + bh < 0 || bx > size || by > size) continue;
-      g.fillRect(bx, by, bw, bh);
-    }
-    // Roads as pale lines on the grid.
-    g.strokeStyle = 'rgba(240,232,214,0.5)';
-    g.lineWidth = Math.max(2, ROAD.width * scale * 0.7);
-    for (const ax of ROAD.avenueX) {
-      const sx = half + (ax - px) * scale;
-      if (sx < -8 || sx > size + 8) continue;
-      g.beginPath();
-      g.moveTo(sx, 0);
-      g.lineTo(sx, size);
-      g.stroke();
-    }
-    for (const sy of ROAD.streetY) {
-      const yy = half + (sy - py) * scale;
-      if (yy < -8 || yy > size + 8) continue;
-      g.beginPath();
-      g.moveTo(0, yy);
-      g.lineTo(size, yy);
-      g.stroke();
-    }
-    void world;
-    void HALF_ROAD;
-
-    // The route ribbon: an amber polyline along the roads from the player
-    // to the marker (state.route, from computeRoute), under every blip.
-    if (state.route && state.route.length > 1) {
-      g.strokeStyle = 'rgba(255,180,60,0.9)';
-      g.lineWidth = 4;
-      g.lineJoin = 'round';
-      g.lineCap = 'round';
-      g.beginPath();
-      state.route.forEach((point, i) => {
-        const sx = half + (point.x - px) * scale;
-        const sy = half + (point.y - py) * scale;
-        if (i === 0) g.moveTo(sx, sy);
-        else g.lineTo(sx, sy);
-      });
-      g.stroke();
-    }
-
-    const blip = (wx, wy, r, color) => {
-      const sx = half + (wx - px) * scale;
-      const sy = half + (wy - py) * scale;
-      const dx = sx - half;
-      const dy = sy - half;
-      const dist = Math.hypot(dx, dy);
-      const rim = half - 6;
-      const cx = dist > rim ? half + (dx / dist) * rim : sx;
-      const cy = dist > rim ? half + (dy / dist) * rim : sy;
-      g.fillStyle = color;
-      g.beginPath();
-      g.arc(cx, cy, r, 0, Math.PI * 2);
-      g.fill();
-      return { cx, cy };
-    };
-
-    // A blip's on-disc position, clamped to the rim like the dots.
-    const blipPos = (wx, wy) => {
-      const sx = half + (wx - px) * scale;
-      const sy = half + (wy - py) * scale;
-      const dx = sx - half;
-      const dy = sy - half;
-      const dist = Math.hypot(dx, dy);
-      const rim = half - 6;
-      return dist > rim ? { cx: half + (dx / dist) * rim, cy: half + (dy / dist) * rim } : { cx: sx, cy: sy };
-    };
-
-    for (const car of state.traffic ?? []) blip(car.x, car.y, 2.2, 'rgba(220,220,228,0.75)');
-    const blinkOn = state.blink === false ? true : Math.floor(performance.now() / 420) % 2 === 0;
-    // Police are triangles now, nose turned to each car's real heading.
-    if (blinkOn) {
-      for (const car of state.police ?? []) {
-        const { cx, cy } = blipPos(car.x, car.y);
-        g.save();
-        g.translate(cx, cy);
-        g.rotate((car.angle ?? 0) + Math.PI / 2);
-        g.fillStyle = '#2ea8ff';
-        g.beginPath();
-        g.moveTo(0, -7);
-        g.lineTo(5.6, 6.2);
-        g.lineTo(-5.6, 6.2);
-        g.closePath();
-        g.fill();
-        g.strokeStyle = 'rgba(255,255,255,0.95)';
-        g.lineWidth = 1;
-        g.stroke();
-        g.restore();
+      els.mpHead.textContent = `CH ${obj.chapter} — ${obj.title}`;
+      els.mpObjective.textContent = obj.label;
+      els.mpSub.textContent = obj.sighted === false ? 'They lost you — keep it that way' :
+        (obj.timer != null && obj.timer < 30 ? 'The clock is loud, Mara' : 'They can see you — break line of sight');
+      els.mpStage.textContent = `STAGE ${obj.stage}/${obj.stages}`;
+      els.mpBar.innerHTML = Array.from({ length: obj.stages }, (_, i) =>
+        `<span class="seg ${i < obj.stage - 1 ? 'done' : i === obj.stage - 1 ? 'now' : ''}"></span>`).join('');
+      els.mpNext.textContent = 'NEXT: ' + obj.next;
+      els.mpTimer.textContent = obj.timer != null ? formatTime(obj.timer) : '';
+    },
+    setPd(units, stars, sighted) {
+      if (stars <= 0) { els.pd.style.display = 'none'; return; }
+      els.pd.style.display = 'block';
+      els.pdHead.textContent = `SHORES PD RESPONSE — ${units.length} UNITS • CODE ${stars}`;
+      els.pdSight.textContent = sighted ? 'IN SIGHT' : 'EVADING';
+      els.pdSight.className = 'sight ' + (sighted ? 'seen' : 'lost');
+      els.pdUnits.innerHTML = units.slice(0, 5).map(u =>
+        `<div class="unit"><span class="uname">${u.name}</span><span class="udist">${u.dist} m</span><span class="uchip ${u.status.toLowerCase().replace(' ', '')}">${u.status}</span></div>`).join('');
+      els.pdFoot.textContent = units.length > 5 ? `+${units.length - 5} more units on Tac-3 — break line of sight` : '';
+    },
+    setWeapons(combat, missionsDone) {
+      els.slots.innerHTML = WEAPONS.map((w, i) => {
+        const un = combat.unlocked(i, missionsDone);
+        return `<div class="slot ${i === combat.current ? 'sel' : ''} ${un ? '' : 'locked'}"><div class="sname">${w.name}</div><div class="skind">${un ? w.kind : 'LOCKED'}</div></div>`;
+      }).join('');
+      const a = combat.ammo();
+      els.ammo.textContent = combat.weapon().kind + ' · ' + a.mag + (a.reserve === Infinity ? ' / ∞' : ' / ' + a.reserve);
+    },
+    setVehicle(inCar, model, kmh, gear, condition, nitro) {
+      els.veh.style.display = inCar ? 'block' : 'none';
+      els.radio.style.display = inCar ? 'block' : 'none';
+      if (!inCar) return;
+      els.vehName.textContent = model;
+      els.speedo.textContent = Math.round(kmh);
+      els.gear.textContent = gear;
+      els.vehCond.style.width = Math.max(0, condition) + '%';
+      els.vehCond.style.background = condition > 55 ? '#57e389' : condition > 28 ? '#ffd23e' : '#ff5c5c';
+      const n = $('nitroFill'); if (n) n.style.width = (nitro * 100) + '%';
+    },
+    setRadio(stationIdx, trackIdx) {
+      const st = RADIO[stationIdx], tr = st.tracks[trackIdx % st.tracks.length];
+      els.radioFreq.textContent = `${st.freq} · ${st.name}`;
+      els.radioTrack.textContent = `'${tr[0]}' — ${tr[1]}`;
+    },
+    wheel(open, combat, missionsDone, selected) {
+      els.wheel.style.display = open ? 'block' : 'none';
+      if (!open) return;
+      els.wheel.innerHTML = WEAPONS.map((w, i) => {
+        const un = combat.unlocked(i, missionsDone);
+        const ang = -90 + i * 120;
+        return `<div class="wedge ${selected === i ? 'sel' : ''} ${un ? '' : 'locked'}" style="transform: rotate(${ang}deg) translateY(-92px) rotate(${-ang}deg)">
+          <div class="wname">${w.name}</div><div class="wkind">${un ? w.kind : 'LOCKED'}</div></div>`;
+      }).join('') + '<div class="wheel-hub">WEAPONS</div>';
+    },
+    showGarage(save, cash) {
+      els.garage.style.display = 'flex';
+      $('garageCash').textContent = '$' + Math.round(cash).toLocaleString('en-US');
+      $('garageList').innerHTML = UPGRADES.map(u => {
+        const owned = save.upgrades.includes(u.id);
+        return `<div class="upg"><div><div class="uname2">${u.name}</div><div class="ublurb">${u.blurb}</div></div>
+          <button data-upg="${u.id}" ${owned || cash < u.cost ? 'disabled' : ''}>${owned ? 'FITTED' : '$' + u.cost.toLocaleString('en-US')}</button></div>`;
+      }).join('');
+      els.garage.querySelectorAll('button[data-upg]').forEach(b =>
+        b.addEventListener('click', () => callbacks.onUpgrade(b.dataset.upg)));
+    },
+    hideGarage() { els.garage.style.display = 'none'; },
+    update(dt) {
+      if (dlgTimer > 0) { dlgTimer -= dt; if (dlgTimer <= 0) els.dlg.style.opacity = '0'; }
+      if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) els.toast.style.opacity = '0'; }
+    },
+    // The round minimap: 120 m of city around the player, north up, gold route.
+    drawMinimap(world, focus, heading, blips, objective, starPts) {
+      const S = els.minimap.width, C = S / 2, scale = C / 120;
+      mm.clearRect(0, 0, S, S);
+      mm.save();
+      mm.beginPath(); mm.arc(C, C, C - 2, 0, 7); mm.clip();
+      mm.fillStyle = '#1d1830'; mm.fillRect(0, 0, S, S);
+      const toMap = (x, z) => [C + (x - focus.x) * scale, C + (z - focus.z) * scale];
+      // water
+      mm.fillStyle = '#2c4a7d';
+      const [wx] = toMap(252, 0); mm.fillRect(wx, 0, S - wx, S);
+      // blocks
+      mm.fillStyle = '#3a3050';
+      for (const b of world.blockRects) {
+        const [x, y] = toMap(b.x - b.w / 2, b.z - b.d / 2);
+        mm.fillRect(x, y, b.w * scale, b.d * scale);
       }
-    }
-    // The objective is a small gold star, not a dot.
-    if (state.marker) {
-      const { cx, cy } = blipPos(state.marker.x, state.marker.y);
-      g.save();
-      g.translate(cx, cy);
-      g.fillStyle = '#ffc94d';
-      g.beginPath();
-      for (let i = 0; i < 10; i += 1) {
-        const r = i % 2 === 0 ? 5.4 : 2.3;
-        const a = -Math.PI / 2 + (i * Math.PI) / 5;
-        if (i === 0) g.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-        else g.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      // roads
+      mm.strokeStyle = '#57496e'; mm.lineWidth = 5;
+      for (const c of ROAD_CENTERS) {
+        let [a] = toMap(c, 0); mm.beginPath(); mm.moveTo(a, 0); mm.lineTo(a, S); mm.stroke();
+        [, a] = toMap(0, c); mm.beginPath(); mm.moveTo(0, a); mm.lineTo(S, a); mm.stroke();
       }
-      g.closePath();
-      g.fill();
-      g.restore();
-    }
-
-    // The player's view cone: a translucent 60° wedge in the aim direction,
-    // under the arrow itself.
-    g.save();
-    g.translate(half, half);
-    g.fillStyle = 'rgba(255,247,234,0.13)';
-    g.beginPath();
-    g.moveTo(0, 0);
-    g.arc(0, 0, 26, (state.aim ?? 0) - Math.PI / 6, (state.aim ?? 0) + Math.PI / 6);
-    g.closePath();
-    g.fill();
-    g.restore();
-
-    // The player: a white arrow that turns with the aim.
-    g.save();
-    g.translate(half, half);
-    g.rotate((state.aim ?? 0) + Math.PI / 2);
-    g.fillStyle = '#fff7ea';
-    g.beginPath();
-    g.moveTo(0, -8);
-    g.lineTo(5.4, 6);
-    g.lineTo(0, 3);
-    g.lineTo(-5.4, 6);
-    g.closePath();
-    g.fill();
-    g.restore();
-
-    g.restore();
-    // North tick, fixed to the rim.
-    g.fillStyle = 'rgba(255,244,228,0.85)';
-    g.font = '700 10px system-ui, sans-serif';
-    g.textAlign = 'center';
-    g.fillText('N', half, 13);
-  }
-
-  // ------------------------------------------------------------ start screen
-  /**
-   * The title entrance, one timeline: the name drops in, the menu staggers
-   * up, and a little coupe silhouette crosses the panel's foot. Returned so
-   * screenshot mode can drive it straight to its end state.
-   */
-  function enterStart() {
-    if (gsap) gsap.set(el.start, { autoAlpha: 1, visibility: 'visible' });
-    el.start.style.pointerEvents = 'none';
-    if (!gsap) return null;
-    if (entranceTimeline) entranceTimeline.kill();
-
-    // A coupe that crosses once under the story text — pure decoration.
-    let coupe = document.getElementById('startCoupe');
-    if (!coupe) {
-      coupe = document.createElement('div');
-      coupe.id = 'startCoupe';
-      coupe.style.cssText = [
-        'position:absolute',
-        'left:0',
-        'bottom:12px',
-        'width:64px',
-        'height:20px',
-        'border-radius:10px 14px 6px 6px',
-        'background:linear-gradient(180deg,#f0a24a,#e2574c)',
-        'box-shadow:0 4px 10px rgba(0,0,0,0.45)',
-        'opacity:0.9',
-      ].join(';');
-      el.startPanel.appendChild(coupe);
-    }
-
-    entranceTimeline = gsap.timeline({ defaults: { ease: 'power3.out' } });
-    entranceTimeline
-      .fromTo(el.startPanel, { autoAlpha: 0, y: 26, scale: 0.98 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.55 })
-      .fromTo(el.title, { autoAlpha: 0, y: -46 }, { autoAlpha: 1, y: 0, duration: 0.6 }, '-=0.25')
-      .fromTo('#startMenu .item', { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.4, stagger: 0.08 }, '-=0.2')
-      .fromTo(coupe, { x: -90, autoAlpha: 0 }, { x: 640, autoAlpha: 1, duration: 1.15, ease: 'power1.inOut' }, '-=0.5')
-      .to(coupe, { autoAlpha: 0, duration: 0.25 }, '-=0.1');
-    if (staticMode) entranceTimeline.progress(1);
-    return entranceTimeline;
-  }
-
-  /** Fold the start screen away when the evening begins. */
-  function hideStart() {
-    if (!gsap) {
-      el.start.style.opacity = '0';
-      el.start.style.visibility = 'hidden';
-      return;
-    }
-    animate(el.start, { autoAlpha: 0, duration: 0.45, ease: 'power2.inOut' });
-  }
-
-  // ------------------------------------------------------------------ pause
-  /** Pause panel in, with a small rise; the game view stays behind it. */
-  function showPause() {
-    if (!gsap) {
-      el.pause.style.opacity = '1';
-      el.pause.style.visibility = 'visible';
-      return;
-    }
-    if (staticMode) gsap.set(el.pause, { autoAlpha: 1 });
-    else {
-      gsap.to(el.pause, { autoAlpha: 1, duration: 0.3, ease: 'power2.out' });
-      gsap.fromTo(el.pausePanel, { y: 14 }, { y: 0, duration: 0.35, ease: 'power3.out' });
-    }
-  }
-
-  /** Pause panel out again. */
-  function hidePause() {
-    if (!gsap) {
-      el.pause.style.opacity = '0';
-      el.pause.style.visibility = 'hidden';
-      return;
-    }
-    animate(el.pause, { autoAlpha: 0, duration: 0.25, ease: 'power2.in' });
-  }
-
-  // ------------------------------------------------------------ mode changes
-  /**
-   * Into play: the HUD groups arrive with a stagger — stars, cash, vitals,
-   * radar — like instruments lighting up one after another.
-   */
-  function enterPlay() {
-    hideStart();
-    setRailActive(true);
-    if (!gsap) return;
-    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#radio', '#radarLabel', '#progress', '#weaponSlots'];
-    if (staticMode) {
-      gsap.set(groups, { autoAlpha: 1, y: 0 });
-      return;
-    }
-    gsap.fromTo(groups, { autoAlpha: 0, y: -10 }, { autoAlpha: 1, y: 0, duration: 0.45, ease: 'power2.out', stagger: 0.07, overwrite: 'auto' });
-  }
-
-  /** Hide every HUD group at once (the start screen owns the frame). */
-  function hideHud() {
-    setRailActive(false);
-    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective', '#speedo', '#missionTag', '#toast', '#hint', '#radio', '#radarLabel', '#progress', '#weaponSlots', '#wheel'];
-    if (gsap) gsap.set(groups, { autoAlpha: 0 });
-  }
-
-  /**
-   * Freeze every animation at its current end state: screenshot mode calls
-   * this after staging, so nothing on screen is mid-tween when photographed.
-   */
-  function freeze() {
-    if (!gsap) return;
-    for (const tween of gsap.globalTimeline.getChildren(true, true, true)) {
-      tween.progress(1);
-    }
-  }
-
-  return {
-    el,
-    setStatic,
-    setWanted,
-    setCash,
-    setHealth,
-    setAmmo,
-    setWeapon,
-    setObjective,
-    hideObjective,
-    setMissionTag,
-    setRailActive,
-    setDossier,
-    setResponse,
-    say,
-    setDistrict,
-    setSpeed,
-    setCarCondition,
-    setClock,
-    setProgress,
-    setWeaponSlots,
-    showWheel,
-    hideWheel,
-    setRadio,
-    banner,
-    endBanner,
-    toast,
-    hint,
-    flash,
-    shake,
-    jolt,
-    drawRadar,
-    enterStart,
-    hideStart,
-    showPause,
-    hidePause,
-    enterPlay,
-    hideHud,
-    freeze,
+      // route: along the nearest avenue of roads, Manhattan style
+      if (objective) {
+        const [ox, oy] = toMap(objective.x, objective.z);
+        const rx = ROAD_CENTERS.reduce((a, b) => Math.abs(b - objective.x) < Math.abs(a - objective.x) ? b : a);
+        const [px] = toMap(rx, 0);
+        mm.strokeStyle = '#ffc92e'; mm.lineWidth = 2.4; mm.beginPath();
+        mm.moveTo(C, C); mm.lineTo(px, C); mm.lineTo(px, oy); mm.lineTo(ox, oy); mm.stroke();
+        mm.fillStyle = '#ffc92e';
+        mm.beginPath(); mm.arc(ox, oy, 4.4, 0, 7); mm.fill();
+      }
+      // sunset stars still out there
+      mm.fillStyle = '#ffe27a';
+      for (const s of starPts) { const [x, y] = toMap(s.x, s.z); mm.fillRect(x - 1.4, y - 1.4, 2.8, 2.8); }
+      // police blips flash red/blue
+      const flash = Math.floor(performance.now() / 280) % 2;
+      for (const b of blips) {
+        const [x, y] = toMap(b.x, b.z);
+        mm.fillStyle = flash ? '#ff4050' : '#3a7bff';
+        mm.beginPath(); mm.moveTo(x, y - 4); mm.lineTo(x - 3.4, y + 3); mm.lineTo(x + 3.4, y + 3); mm.closePath(); mm.fill();
+      }
+      // player arrow
+      mm.translate(C, C); mm.rotate(heading);
+      mm.fillStyle = '#ffffff';
+      mm.beginPath(); mm.moveTo(0, -7); mm.lineTo(-4.6, 5); mm.lineTo(0, 2.4); mm.lineTo(4.6, 5); mm.closePath(); mm.fill();
+      mm.restore();
+      mm.strokeStyle = 'rgba(255,255,255,0.35)'; mm.lineWidth = 2;
+      mm.beginPath(); mm.arc(C, C, C - 2, 0, 7); mm.stroke();
+      mm.fillStyle = '#fff'; mm.font = '700 10px system-ui'; mm.textAlign = 'center';
+      mm.fillText('N', C, 12);
+    },
   };
+  $('btnNew').addEventListener('click', () => callbacks.onStart(true));
+  $('btnContinue').addEventListener('click', () => callbacks.onStart(false));
+  $('btnGarageClose').addEventListener('click', () => callbacks.onCloseGarage());
+  return hud;
 }
-
-export { WORLD };
