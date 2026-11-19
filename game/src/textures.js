@@ -13,14 +13,14 @@ function tex(c, rx = 1, ry = 1) {
   return t;
 }
 
-// The sunset sky: violet zenith melting through magenta into a tangerine band.
+// The night sky: near-black violet zenith sinking to a deep indigo horizon
+// with only a low magenta neon haze where the city glow meets the clouds.
 export function skyTexture() {
   const c = canvas(64, 512), g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0.0, '#1d1440'); grad.addColorStop(0.34, '#4b2064');
-  grad.addColorStop(0.55, '#93356e'); grad.addColorStop(0.72, '#e0527a');
-  grad.addColorStop(0.86, '#ff8a4a'); grad.addColorStop(0.96, '#ffc46b');
-  grad.addColorStop(1.0, '#ffe3a1');
+  grad.addColorStop(0.0, '#020109'); grad.addColorStop(0.34, '#0a0620');
+  grad.addColorStop(0.58, '#150b33'); grad.addColorStop(0.78, '#22104a');
+  grad.addColorStop(0.92, '#33135c'); grad.addColorStop(1.0, '#3d1660');
   g.fillStyle = grad; g.fillRect(0, 0, 64, 512);
   return tex(c);
 }
@@ -35,8 +35,8 @@ export function glowTexture(inner = 'rgba(255,255,255,1)', outer = 'rgba(255,255
 }
 
 const FACADE_PALETTES = [
-  ['#f7d9b0', '#e8906f'], ['#fdeeda', '#7fd4c1'], ['#f6c6d8', '#e0527a'], ['#d9ecf7', '#5b8def'],
-  ['#f2e3f7', '#8d6fd1'], ['#fff3c9', '#e8a547'], ['#d8f3dc', '#3fbf8f'], ['#f9dcc4', '#d94f70'],
+  ['#6e5138', '#e8906f'], ['#5c6658', '#7fd4c1'], ['#6e4258', '#e0527a'], ['#42546e', '#5b8def'],
+  ['#584a6e', '#8d6fd1'], ['#6e5c34', '#e8a547'], ['#40604c', '#3fbf8f'], ['#6e3c48', '#d94f70'],
 ];
 
 // An art-deco facade: banded windows (some lit gold for the evening), a neon
@@ -67,7 +67,7 @@ export function facadePair(rng, floors, cols) {
       // window frame + sill
       g.fillStyle = 'rgba(20,12,30,0.85)'; g.fillRect(x - 3, y - 3, w + 6, h + 6);
       g.fillStyle = 'rgba(255,255,255,0.16)'; g.fillRect(x - 3, y + h + 3, w + 6, 2);
-      const lit = rng() < 0.55;
+      const lit = rng() < 0.7;
       const warm = rng() < 0.72;
       const colr = lit ? (warm ? '#ffd98a' : '#a8e6ff') : '#2c2440';
       g.fillStyle = colr; g.fillRect(x, y, w, h);
@@ -122,7 +122,7 @@ export function roofTexture(rng) {
 // Asphalt with a worn centre line; drawn per road segment and repeated.
 export function roadTexture() {
   const c = canvas(128, 256), g = c.getContext('2d');
-  g.fillStyle = '#201c2b'; g.fillRect(0, 0, 128, 256);
+  g.fillStyle = '#0a0912'; g.fillRect(0, 0, 128, 256);
   for (let i = 0; i < 26; i++) { // damp patches and repairs
     g.fillStyle = `rgba(${10 + Math.random() * 16},${8 + Math.random() * 12},${20 + Math.random() * 18},0.35)`;
     g.beginPath(); g.ellipse(Math.random() * 128, Math.random() * 256, 8 + Math.random() * 22, 12 + Math.random() * 30, 0, 0, 7); g.fill();
@@ -131,24 +131,24 @@ export function roadTexture() {
   for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.16})`; g.fillRect(Math.random() * 128, Math.random() * 256, 2, 2); }
   g.fillStyle = '#f7f3ea'; g.fillRect(2, 0, 4, 256); g.fillRect(122, 0, 4, 256);
   g.fillStyle = '#ffd23e'; g.fillRect(61, 8, 6, 62); g.fillRect(61, 150, 6, 62);
-  // sunset sheen baked into the middle of the lane
+  // neon sheen baked into the middle of the lane — the sky's glow on wet asphalt
   const sheen = g.createLinearGradient(0, 0, 128, 0);
-  sheen.addColorStop(0, 'rgba(255,110,140,0)'); sheen.addColorStop(0.5, 'rgba(255,120,110,0.20)'); sheen.addColorStop(1, 'rgba(255,110,140,0)');
+  sheen.addColorStop(0, 'rgba(60,80,255,0)'); sheen.addColorStop(0.5, 'rgba(120,90,255,0.16)'); sheen.addColorStop(1, 'rgba(60,80,255,0)');
   g.fillStyle = sheen; g.fillRect(0, 0, 128, 256);
   return tex(c);
 }
 
 export function crosswalkTexture() {
   const c = canvas(128, 128), g = c.getContext('2d');
-  g.fillStyle = '#201c2b'; g.fillRect(0, 0, 128, 128);
-  g.fillStyle = 'rgba(247,243,234,0.85)';
+  g.fillStyle = '#0d0c16'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(220,228,255,0.75)';
   for (let i = 0; i < 5; i++) g.fillRect(10 + i * 23, 12, 13, 104);
   return tex(c);
 }
 
 export function sidewalkTexture() {
   const c = canvas(128, 128), g = c.getContext('2d');
-  g.fillStyle = '#9a8fa3'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#353144'; g.fillRect(0, 0, 128, 128);
   g.strokeStyle = 'rgba(40,30,55,0.5)'; g.lineWidth = 2;
   g.strokeRect(1, 1, 126, 126); g.beginPath(); g.moveTo(64, 0); g.lineTo(64, 128); g.stroke();
   for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(60,40,70,${Math.random() * 0.12})`; g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
@@ -157,18 +157,19 @@ export function sidewalkTexture() {
 
 export function sandTexture() {
   const c = canvas(128, 128), g = c.getContext('2d');
-  g.fillStyle = '#eecfa1'; g.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 700; i++) { g.fillStyle = `rgba(160,110,60,${Math.random() * 0.2})`; g.fillRect(Math.random() * 128, Math.random() * 128, 1.6, 1.6); }
+  g.fillStyle = '#4a3d2e'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 700; i++) { g.fillStyle = `rgba(20,14,10,${Math.random() * 0.25})`; g.fillRect(Math.random() * 128, Math.random() * 128, 1.6, 1.6); }
   return tex(c);
 }
 
 export function waterTexture() {
   const c = canvas(256, 256), g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#7a2d5e'); grad.addColorStop(0.5, '#46255e'); grad.addColorStop(1, '#2c1e4e');
+  grad.addColorStop(0, '#0a1030'); grad.addColorStop(0.5, '#0d1440'); grad.addColorStop(1, '#060818');
   g.fillStyle = grad; g.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 90; i++) {
-    g.fillStyle = `rgba(255,${140 + Math.random() * 80},90,${0.05 + Math.random() * 0.16})`;
+    const neon = Math.random() < 0.5 ? '34,211,238' : '255,79,163';
+    g.fillStyle = `rgba(${neon},${0.05 + Math.random() * 0.2})`;
     g.fillRect(Math.random() * 256, Math.random() * 256, 12 + Math.random() * 42, 1.6);
   }
   return tex(c);
@@ -235,28 +236,28 @@ export function signTexture(text, bg, fg) {
   return t;
 }
 
-// Equirect sunset for scene.environment: every glossy surface in the city —
-// wet asphalt, coupe paint, glass — reflects this sky, so the whole frame
-// picks up the pink/orange neon sheen of the golden hour.
+// Equirect night sky for scene.environment: every glossy surface in the
+// city — mirror-wet asphalt, coupe clearcoat, glass — reflects this, so the
+// whole frame picks up deep violet sky and hard neon smears, never sunset.
 export function sunsetEnvTexture() {
   const c = canvas(512, 256), g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0.0, '#241448'); grad.addColorStop(0.38, '#5c2064');
-  grad.addColorStop(0.55, '#c94b74'); grad.addColorStop(0.64, '#ff8a4a');
-  grad.addColorStop(0.70, '#ffc46b'); grad.addColorStop(0.76, '#7a3a56');
-  grad.addColorStop(1.0, '#1c1026');
+  grad.addColorStop(0.0, '#03020c'); grad.addColorStop(0.38, '#0d0724');
+  grad.addColorStop(0.55, '#1c0f42'); grad.addColorStop(0.64, '#2c1460');
+  grad.addColorStop(0.70, '#3a1a6e'); grad.addColorStop(0.76, '#160b30');
+  grad.addColorStop(1.0, '#05030f');
   g.fillStyle = grad; g.fillRect(0, 0, 512, 256);
-  // the sun: a hard bright blob low on the horizon
-  const sun = g.createRadialGradient(128, 168, 2, 128, 168, 90);
-  sun.addColorStop(0, 'rgba(255,246,200,1)'); sun.addColorStop(0.25, 'rgba(255,190,90,0.85)');
-  sun.addColorStop(1, 'rgba(255,140,80,0)');
-  g.fillStyle = sun; g.fillRect(0, 60, 512, 216);
+  // the moon: a hard pale blob high in the sky
+  const sun = g.createRadialGradient(392, 52, 2, 392, 52, 60);
+  sun.addColorStop(0, 'rgba(235,242,255,1)'); sun.addColorStop(0.25, 'rgba(170,195,255,0.7)');
+  sun.addColorStop(1, 'rgba(120,150,255,0)');
+  g.fillStyle = sun; g.fillRect(300, 0, 212, 140);
   // neon smears in the lower half — city lights waiting to be reflected
   const smears = ['#ff4fa3', '#22d3ee', '#ffd23e', '#e0527a', '#7dff6a', '#ff8c42'];
-  for (let i = 0; i < 42; i++) {
-    g.fillStyle = smears[i % smears.length] + '55';
-    const w = 6 + Math.random() * 26;
-    g.fillRect(Math.random() * 512, 176 + Math.random() * 62, w, 2.5 + Math.random() * 4);
+  for (let i = 0; i < 64; i++) {
+    g.fillStyle = smears[i % smears.length] + '88';
+    const w = 6 + Math.random() * 30;
+    g.fillRect(Math.random() * 512, 172 + Math.random() * 66, w, 3 + Math.random() * 5);
   }
   const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
   t.mapping = THREE.EquirectangularReflectionMapping;
@@ -298,10 +299,10 @@ export function neonSignTexture(text, fg) {
 // Weathered pier deck: plank runs with tar seams, stains and a painted safety line.
 export function pierTexture() {
   const c = canvas(256, 256), g = c.getContext('2d');
-  g.fillStyle = '#7d5f42'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#33261a'; g.fillRect(0, 0, 256, 256);
   for (let y = 0; y < 256; y += 32) {
     const tone = 0.9 + Math.random() * 0.25;
-    g.fillStyle = `rgb(${125 * tone | 0},${95 * tone | 0},${66 * tone | 0})`; g.fillRect(0, y, 256, 30);
+    g.fillStyle = `rgb(${66 * tone | 0},${50 * tone | 0},${35 * tone | 0})`; g.fillRect(0, y, 256, 30);
     g.fillStyle = 'rgba(30,20,14,0.85)'; g.fillRect(0, y + 30, 256, 2);
     g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(Math.random() * 200, y, 3, 30);
   }
@@ -315,7 +316,7 @@ export function pierTexture() {
 export function lunaPortraitTexture() {
   const c = canvas(96, 96), g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 96);
-  grad.addColorStop(0, '#ff8a4a'); grad.addColorStop(1, '#93356e');
+  grad.addColorStop(0, '#7a5cff'); grad.addColorStop(1, '#3b1650');
   g.fillStyle = grad; g.fillRect(0, 0, 96, 96);
   g.fillStyle = '#2c1a2e'; g.beginPath(); g.arc(48, 40, 17, 0, 7); g.fill();
   g.fillStyle = '#f2b183'; g.beginPath(); g.arc(48, 42, 13, 0, 7); g.fill();

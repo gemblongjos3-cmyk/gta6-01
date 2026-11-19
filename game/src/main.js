@@ -35,7 +35,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.22;
+renderer.toneMappingExposure = 1.15;
 document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -141,7 +141,7 @@ const hud = createHud({
     G.started = true;
     hud.hideStart();
     audio.unlock();
-    hud.say('Sunset Avenue is yours, Mara. The Vespera is waiting on the Strand — and Luna is on comms.', LUNA);
+    hud.say('Rain is hammering Palm Shores tonight, Mara. The Vespera is waiting on the Strand — and Luna is on comms.', LUNA);
   },
   onUpgrade(id) {
     const up = { engine: 900, nitro: 1400, armor: 1100 }[id];

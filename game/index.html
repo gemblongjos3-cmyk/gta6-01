@@ -6,10 +6,10 @@
 <title>Palm Shores — an open-world crime game</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; overflow: hidden; background: #160f24; font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; color: #f5eefc; }
+  html, body { height: 100%; overflow: hidden; background: #07040f; font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; color: #f5eefc; }
   #app, #app canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   #grade { position: absolute; inset: 0; pointer-events: none; z-index: 3;
-    background: radial-gradient(ellipse at 50% 42%, transparent 48%, rgba(20,4,32,0.52) 100%); }
+    background: radial-gradient(ellipse at 50% 42%, transparent 46%, rgba(2,0,12,0.66) 100%); }
   #hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
   .panel { background: rgba(16,10,28,0.78); border: 1px solid rgba(255,120,180,0.35); border-radius: 10px;
     box-shadow: 0 6px 24px rgba(0,0,0,0.45); backdrop-filter: blur(3px); }
@@ -114,10 +114,10 @@
   .wheel-hub { position: absolute; left: -40px; top: -10px; width: 80px; text-align: center; font-size: 10px; letter-spacing: 0.2em; color: #ffc92e; font-weight: 800; }
   /* start screen */
   #startScreen { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(180deg, rgba(20,8,34,0.25), rgba(20,8,34,0.62)); pointer-events: auto; }
+    background: linear-gradient(180deg, rgba(4,2,16,0.3), rgba(4,2,16,0.74)); pointer-events: auto; }
   #startCard { width: 620px; max-width: 92vw; padding: 26px 32px; text-align: center; }
   #startCard h1 { font-size: 58px; font-weight: 900; letter-spacing: 0.04em; line-height: 0.95;
-    background: linear-gradient(92deg, #ffc92e 10%, #ff4fa3 55%, #ff8a4a 95%); -webkit-background-clip: text; background-clip: text; color: transparent;
+    background: linear-gradient(92deg, #22d3ee 5%, #ff4fa3 55%, #8a5cff 95%); -webkit-background-clip: text; background-clip: text; color: transparent;
     text-shadow: 0 6px 30px rgba(255,79,163,0.25); }
   #startCard .tag { color: #ffd9ec; letter-spacing: 0.34em; font-size: 12px; font-weight: 700; margin-top: 6px; }
   #startStory { margin: 16px 0 6px; font-size: 14.5px; line-height: 1.5; color: #efe6ff; }
@@ -125,7 +125,7 @@
   #startFeats span { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; padding: 4px 9px; border-radius: 20px;
     background: rgba(255,79,163,0.18); border: 1px solid rgba(255,79,163,0.55); color: #ffd9ec; }
   .menuBtn { pointer-events: auto; display: block; margin: 8px auto 0; width: 280px; padding: 11px 0; font-size: 16px; font-weight: 800;
-    letter-spacing: 0.1em; color: #181020; background: linear-gradient(92deg, #ffc92e, #ff8a4a); border: 0; border-radius: 9px; cursor: pointer; }
+    letter-spacing: 0.1em; color: #181020; background: linear-gradient(92deg, #22d3ee, #ff4fa3); border: 0; border-radius: 9px; cursor: pointer; }
   .menuBtn:hover { filter: brightness(1.1); }
   #controlsLine { margin-top: 16px; font-size: 11.5px; color: #b8a8d8; line-height: 1.7; }
   #controlsLine b { color: #e8dcff; }

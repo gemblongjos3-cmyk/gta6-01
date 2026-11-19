@@ -9,16 +9,28 @@ import * as THREE from 'three';
 import { TRAFFIC_MODELS, TRAFFIC_COLORS } from './config.js';
 import { rngPick, rngRange, clamp } from './random.js';
 import { ROAD_CENTERS } from './city.js';
-import { signTexture, glowTexture, rimTexture } from './textures.js';
+import { signTexture, glowTexture, rimTexture, streakTexture } from './textures.js';
 
-const glassMat = new THREE.MeshStandardMaterial({ color: 0x101a28, metalness: 0.7, roughness: 0.08, envMapIntensity: 1.7 });
+const glassMat = new THREE.MeshStandardMaterial({ color: 0x0a1220, metalness: 0.7, roughness: 0.06, envMapIntensity: 2.5 });
 const tireMat = new THREE.MeshStandardMaterial({ color: 0x0c0c0f, roughness: 0.92 });
 const chromeMat = new THREE.MeshStandardMaterial({ color: 0xd8dee6, metalness: 0.9, roughness: 0.22 });
 const trimMat = new THREE.MeshStandardMaterial({ color: 0x14151c, metalness: 0.3, roughness: 0.65 });
-const tailMat = new THREE.MeshStandardMaterial({ color: 0x30060c, emissive: 0xff2233, emissiveIntensity: 2.8 });
-const headMat = new THREE.MeshStandardMaterial({ color: 0x444033, emissive: 0xffe9b0, emissiveIntensity: 2.4 });
-let pdDoorTex = null, glowTexShared = null, rimTexShared = null;
+const tailMat = new THREE.MeshStandardMaterial({ color: 0x30060c, emissive: 0xff2233, emissiveIntensity: 5 });
+const headMat = new THREE.MeshStandardMaterial({ color: 0x444033, emissive: 0xffe9b0, emissiveIntensity: 5 });
+let pdDoorTex = null, glowTexShared = null, rimTexShared = null, streakTexShared = null;
 const glowTex = () => glowTexShared ??= glowTexture();
+const streakTex = () => streakTexShared ??= streakTexture();
+// Fake volumetric headlight cone: narrow at the lamp, wide at the far end.
+const headConeGeo = new THREE.CylinderGeometry(0.95, 0.14, 5.2, 12, 1, true);
+headConeGeo.rotateX(Math.PI / 2);
+const headConeMat = new THREE.MeshBasicMaterial({ color: 0xffe9b0, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+// A long coloured streak the car's lights smear across the wet asphalt.
+function roadStreak(g, color, w, l, x, z, opacity) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l),
+    new THREE.MeshBasicMaterial({ map: streakTex(), color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  m.rotation.x = -Math.PI / 2; m.position.set(x, 0.055, z); m.renderOrder = 2; g.add(m);
+  return m;
+}
 
 // ---- profile geometry --------------------------------------------------------
 // A car's side silhouette as an extruded shape: `top` lists the outline from
@@ -126,8 +138,8 @@ export function makeCarEntity(scene, { kind = 'sedan', color = 0xffffff, police 
   const { body: bodyGeo, cabin: cabinGeo, p } = kindGeos(kind);
   const { W, L, axles } = p;
   const paint = new THREE.MeshPhysicalMaterial({
-    color: police ? 0x15151c : color, metalness: 0.25, roughness: 0.3,
-    clearcoat: 1, clearcoatRoughness: 0.12, envMapIntensity: 1.6,
+    color: police ? 0x15151c : color, metalness: 0.25, roughness: 0.2,
+    clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 2.4,
     emissive: police ? 0x000000 : new THREE.Color(color).multiplyScalar(0.12),
   });
   const body = new THREE.Mesh(bodyGeo, paint);
@@ -164,7 +176,7 @@ export function makeCarEntity(scene, { kind = 'sedan', color = 0xffffff, police 
     sign.castShadow = false;
   }
   if (police) {
-    const white = new THREE.MeshPhysicalMaterial({ color: 0xf2f0ea, metalness: 0.25, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.12, envMapIntensity: 1.4 });
+    const white = new THREE.MeshPhysicalMaterial({ color: 0xf2f0ea, metalness: 0.25, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 2.1 });
     box(W + 0.07, 0.52, L * 0.36, white, 0, 0.72, 0.05, g);                    // white doors band
     box(W * 0.8, 0.06, L * 0.3, white, 0, 1.4, -0.25, g);                      // white roof cap
     box(W * 0.7, 0.3, 0.24, trimMat, 0, 0.52, L / 2 + 0.08, g);                // push bar
@@ -180,19 +192,28 @@ export function makeCarEntity(scene, { kind = 'sedan', color = 0xffffff, police 
     bar.position.set(0, 1.56, -0.25); g.add(bar);
     g.userData.lightbar = { red, blue };
     for (const [sx, col] of [[-0.32, 0xff2038], [0.32, 0x2255ff]]) {
-      glowSprite(g, col, sx, 1.6, -0.25, 2.6, 2.6, 0.5);
-      underGlow(g, col, 1.9, L * 1.35, 0.30, sx * 2.4);
+      glowSprite(g, col, sx, 1.6, -0.25, 3.4, 3.4, 0.7);
+      underGlow(g, col, 1.9, L * 1.35, 0.5, sx * 2.4);
+      roadStreak(g, col, 1.7, 8, sx * 2.2, -L / 2 - 2.6, 0.4);
     }
   }
-  if (kind === 'coupe' && !police) underGlow(g, color, 3.4, L * 1.3, 0.30);
+  if (kind === 'coupe' && !police) underGlow(g, color, 3.6, L * 1.35, 0.52);
+  else if (!police) underGlow(g, color, 2.9, L * 1.18, 0.2);
   // lights, with additive halos so they bloom against the dusk
   box(0.36, 0.11, 0.06, headMat, -W * 0.3, 0.66, L / 2 + 0.02, g);
   box(0.36, 0.11, 0.06, headMat, W * 0.3, 0.66, L / 2 + 0.02, g);
   box(0.36, 0.1, 0.06, tailMat, -W * 0.3, 0.8, -L / 2 - 0.02, g);
   box(0.36, 0.1, 0.06, tailMat, W * 0.3, 0.8, -L / 2 - 0.02, g);
   if (kind === 'coupe') box(W * 0.66, 0.07, 0.05, tailMat, 0, 0.84, -L / 2 - 0.02, g); // full-width light bar
-  for (const s of [-1, 1]) glowSprite(g, 0xffe9b0, s * W * 0.3, 0.66, L / 2 + 0.16, 1.15, 1.15, 0.5);
-  glowSprite(g, 0xff2233, 0, 0.8, -L / 2 - 0.16, 2.1, 0.75, 0.42);
+  for (const s of [-1, 1]) {
+    glowSprite(g, 0xffe9b0, s * W * 0.3, 0.66, L / 2 + 0.16, 1.6, 1.6, 0.75);
+    // the beam itself: a fake volumetric cone thrown onto the wet road
+    const cone = new THREE.Mesh(headConeGeo, headConeMat);
+    cone.position.set(s * W * 0.3, 0.6, L / 2 + 2.55); cone.renderOrder = 3; g.add(cone);
+    roadStreak(g, 0xffe9b0, 1.5, 8.5, s * W * 0.3, L / 2 + 4.2, 0.34);
+  }
+  glowSprite(g, 0xff2233, 0, 0.8, -L / 2 - 0.16, 2.7, 0.95, 0.65);
+  roadStreak(g, 0xff2233, 2.4, 6.5, 0, -L / 2 - 3.1, 0.34);
   if (kind === 'coupe') for (const s of [-1, 1]) { // twin exhausts
     const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.2, 8), chromeMat);
     ex.rotation.x = Math.PI / 2; ex.position.set(s * 0.52, 0.3, -L / 2 - 0.06); g.add(ex);

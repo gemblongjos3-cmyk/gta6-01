@@ -6,12 +6,13 @@
 
 import * as THREE from 'three';
 import { HERO_CAR } from './config.js';
+import { updateSun } from './city.js';
 
-function snapChase(game, car, dist = 10.5, height = 3.0) {
+function snapChase(game, car, dist = 7.4, height = 1.7) {
   const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
   game.camera.position.set(car.mesh.position.x - fx * dist, height, car.mesh.position.z - fz * dist);
-  game.camera.lookAt(car.mesh.position.x + fx * 7, 1.25, car.mesh.position.z + fz * 7);
-  game.camera.fov = 68; game.camera.updateProjectionMatrix();
+  game.camera.lookAt(car.mesh.position.x + fx * 7, 1.05, car.mesh.position.z + fz * 7);
+  game.camera.fov = 64; game.camera.updateProjectionMatrix();
 }
 
 function settle(game, frames = 50) {
@@ -21,46 +22,51 @@ function settle(game, frames = 50) {
 export function stageShot(game, name) {
   const { hud, pd, heli, combat, world } = game;
   if (name === 'cover') {
-    // — the Paper Moon chase, westbound on Sunset Avenue into the sun
+    // — the Paper Moon chase, westbound on the avenue in neon rain at night
     const car = game.heroCar;
-    car.setPos(96, 2.5, -Math.PI / 2);
+    car.setPos(56, 2.5, -Math.PI / 2);
     car.speed = 45.7; car.vx = -45.7; car.vz = 0; car.condition = 98; car.nitro = 0.8;
     game.setInCar(true);
+    updateSun(world, new THREE.Vector3(56, 0, 2.5));
     pd.heat = 400; pd.lockFloor = 4;
-    pd.placeUnit(0, 100.5, -4.6, -Math.PI / 2, 'RAMMING');
-    pd.placeUnit(1, 97.5, 9.2, -Math.PI / 2, 'RAMMING');
-    pd.placeUnit(2, 118, -1.5, -Math.PI / 2, 'PURSUIT');
-    pd.placeUnit(3, 84, 6.0, -Math.PI / 2, 'PURSUIT');
-    pd.spawnRoadblockAt(38, 0, false);
+    pd.placeUnit(0, 48, -6.8, -Math.PI / 2, 'RAMMING');
+    pd.placeUnit(1, 48.5, 9.2, -Math.PI / 2, 'RAMMING');
+    pd.placeUnit(2, 74, -1.5, -Math.PI / 2, 'PURSUIT');
+    pd.placeUnit(3, 39, 5.5, -Math.PI / 2, 'PURSUIT');
+    pd.spawnRoadblockAt(24, 0, false);
     // city life inside the frame: traffic on the avenue, a car at the curb
     const tc = game.traffic?.cars ?? [];
-    if (tc[0]) { tc[0].setPos(58, -5.4, -Math.PI / 2); tc[0].speed = 0; }
-    if (tc[1]) { tc[1].setPos(64, 5.6, Math.PI / 2); tc[1].speed = 0; }
-    if (tc[2]) { tc[2].setPos(126, 12.4, Math.PI / 2); tc[2].speed = 0; }
-    for (let i = 0; i < 70; i++) heli.update(0.05, { x: 96, z: 2.5, stars: 4 }, i * 0.05);
-    // pin the Osprey in the sky ahead, small against the sunset like the reference
-    heli.mesh.position.set(66, 17, -7);
+    if (tc[0]) { tc[0].setPos(36, -5.4, -Math.PI / 2); tc[0].speed = 0; }
+    if (tc[1]) { tc[1].setPos(40, 5.6, Math.PI / 2); tc[1].speed = 0; }
+    if (tc[2]) { tc[2].setPos(82, 12.4, Math.PI / 2); tc[2].speed = 0; }
+    for (let i = 0; i < 70; i++) heli.update(0.05, { x: 56, z: 2.5, stars: 4 }, i * 0.05);
+    // pin the Osprey in the rainy sky ahead, its beam raking the avenue
+    heli.mesh.position.set(47, 11.5, 5);
     heli.mesh.rotation.y = 2.1;
     snapChase(game, car);
-    hud.setCash(38420); hud.setClock(18 * 60 + 52, 1); hud.setStars(4);
+    // tilt up a breath so the FLAMINGO FM board and the Osprey share the frame
+    game.camera.position.y = 2.1;
+    game.camera.lookAt(49, 3.2, 2.5);
+    hud.setCash(38420); hud.setClock(23 * 60 + 47, 1); hud.setStars(4);
     hud.setProgress(438, 4); hud.setHealth(92);
     hud.setMission({ chapter: 7, title: 'PAPER MOON', label: "Lose the cops before Luna's scanner window closes", stage: 2, stages: 3, next: 'Bring the money home', timer: 126, sighted: true }, 'SUNSET AVENUE · DOWNTOWN');
-    const units = pd.unitsForHud({ x: 96, z: 2.5 });
-    units.splice(2, 0, heli.unitForHud({ x: 96, z: 2.5 }));
+    const units = pd.unitsForHud({ x: 56, z: 2.5 });
+    units.splice(2, 0, heli.unitForHud({ x: 56, z: 2.5 }));
     hud.setPd(units, 4, true);
     combat.current = 1;
     hud.setWeapons(combat, 4);
     hud.setRadio(0, 0);
     hud.setVehicle(true, HERO_CAR.model, 151, 'D4', 98, 0.8);
     hud.say("Alarms are back! You've got the whole department coming — lose them!");
-    hud.drawMinimap(world, { x: 96, z: 2.5 }, -Math.PI / 2,
-      pd.unitsForHud({ x: 96, z: 2.5 }).map(u => ({ x: 96, z: 2.5 })), { x: -150, z: 138 }, []);
+    hud.drawMinimap(world, { x: 56, z: 2.5 }, -Math.PI / 2,
+      pd.unitsForHud({ x: 56, z: 2.5 }).map(u => ({ x: 56, z: 2.5 })), { x: -150, z: 138 }, []);
     drawBlips(game);
   }
   if (name === 'docks') {
-    // — on foot at the end of Pier Nine, facing the crew down the deck into the sunset
+    // — on foot at the end of Pier Nine, facing the crew down the rainy deck
     const p = game.player;
     p.setPos(322, 152, -Math.PI / 2);
+    updateSun(world, new THREE.Vector3(322, 0, 152));
     p.aiming = true;
     p.limbs.armR.rotation.x = -1.35; p.limbs.armL.rotation.x = -1.1;
     game.setInCar(false);
@@ -74,10 +80,10 @@ export function stageShot(game, name) {
     pd.heat = 200;
     pd.placeUnit(0, 300, 141, 0.9, 'PURSUIT');
     for (let i = 0; i < 40; i++) heli.update(0.05, { x: 322, z: 152, stars: 2 }, i * 0.05);
-    game.camera.position.set(326.6, 2.0, 152);
-    game.camera.lookAt(309, 1.2, 150);
-    game.camera.fov = 55; game.camera.updateProjectionMatrix();
-    hud.setCash(12850); hud.setClock(19 * 60 + 7, 1); hud.setStars(2);
+    game.camera.position.set(325.8, 1.7, 152.5);
+    game.camera.lookAt(309, 1.1, 150);
+    game.camera.fov = 57; game.camera.updateProjectionMatrix();
+    hud.setCash(12850); hud.setClock(23 * 60 + 7, 1); hud.setStars(2);
     hud.setProgress(690, 3); hud.setHealth(76);
     hud.setMission({ chapter: 4, title: 'PIER NINE', label: 'Clear the Velmara crew off Pier Nine', stage: 1, stages: 2, next: 'Pick up the ledger at the end of the pier', timer: null, sighted: true }, 'PIER NINE');
     hud.setPd(pd.unitsForHud({ x: 322, z: 152 }), 2, true);
@@ -91,38 +97,40 @@ export function stageShot(game, name) {
   if (name === 'delivery') {
     // — stage 3 of Paper Moon: the money run home to Bayline
     const car = game.heroCar;
-    car.setPos(-112, 110, Math.PI * 0.72);
-    car.speed = 19.4; car.vx = Math.sin(Math.PI * 0.72) * 19.4; car.vz = Math.cos(Math.PI * 0.72) * 19.4;
+    car.setPos(-96, 113.5, -Math.PI / 2);
+    car.speed = 19.4; car.vx = -19.4; car.vz = 0;
     car.condition = 87; car.nitro = 0.45;
     game.setInCar(true);
+    updateSun(world, new THREE.Vector3(-96, 0, 113.5));
     game.missions.setMarker(-150, 138, true);
     pd.heat = 400; pd.lockFloor = 0; pd.sighted = false;
-    pd.placeUnit(0, -84, 84, Math.PI * 0.8, 'PURSUIT');
-    pd.placeUnit(1, -70, 102, Math.PI * 0.85, 'INTERCEPT');
-    for (let i = 0; i < 50; i++) heli.update(0.05, { x: -112, z: 110, stars: 4 }, i * 0.05);
-    snapChase(game, car, 8.2, 2.8);
-    hud.setCash(38420); hud.setClock(19 * 60 + 41, 1); hud.setStars(4);
+    pd.placeUnit(0, -78, 106, -Math.PI / 2, 'PURSUIT');
+    pd.placeUnit(1, -64, 120, -Math.PI / 2, 'INTERCEPT');
+    for (let i = 0; i < 50; i++) heli.update(0.05, { x: -96, z: 113.5, stars: 4 }, i * 0.05);
+    snapChase(game, car, 7.0, 1.8);
+    hud.setCash(38420); hud.setClock(23 * 60 + 41, 1); hud.setStars(4);
     hud.setProgress(438, 4); hud.setHealth(92);
     hud.setMission({ chapter: 7, title: 'PAPER MOON', label: 'Bring the money home', stage: 3, stages: 3, next: 'Park it in the Bayline bay', timer: null, sighted: false }, 'BAYLINE');
-    const units = pd.unitsForHud({ x: -112, z: 110 });
-    units.push(heli.unitForHud({ x: -112, z: 110 }));
+    const units = pd.unitsForHud({ x: -96, z: 113.5 });
+    units.push(heli.unitForHud({ x: -96, z: 113.5 }));
     hud.setPd(units, 4, false);
     combat.current = 1;
     hud.setWeapons(combat, 4);
     hud.setRadio(1, 0);
     hud.setVehicle(true, HERO_CAR.model, 64, 'D3', 87, 0.45);
     hud.say('Nearly home. The bay is open — bring my money in, Mara.');
-    hud.drawMinimap(world, { x: -112, z: 110 }, Math.PI * 0.78,
-      [{ x: -84, z: 84 }, { x: -70, z: 102 }], { x: -150, z: 138 },
+    hud.drawMinimap(world, { x: -96, z: 113.5 }, -Math.PI / 2,
+      [{ x: -78, z: 106 }, { x: -64, z: 120 }], { x: -150, z: 138 },
       world.starSpots.filter((s, i) => i % 3 === 0));
   }
   if (name === 'start') {
     game.setInCar(true);
-    game.heroCar.setPos(30, 3.4, -Math.PI / 2);
+    updateSun(world, new THREE.Vector3(20, 0, 0));
+    game.heroCar.setPos(36, 3.4, -Math.PI / 2);
     game.heroCar.speed = 12;
-    game.camera.position.set(97, 7.5, 2);
-    game.camera.lookAt(-70, 2, 0);
-    game.camera.fov = 58; game.camera.updateProjectionMatrix();
+    game.camera.position.set(63, 3.4, 9.5);
+    game.camera.lookAt(0, 1.6, 0);
+    game.camera.fov = 56; game.camera.updateProjectionMatrix();
     hud.showStart(game.save, game.storyLines);
     document.getElementById('hud').style.display = 'none';
   }
@@ -136,8 +144,8 @@ function drawBlips(game) {
   const { hud, pd, world } = game;
   const blips = [];
   // staged cruiser positions are known constants of the cover scene
-  blips.push({ x: 108, z: -3.4 }, { x: 112, z: 4.4 }, { x: 122, z: -0.5 }, { x: 84, z: 6.5 }, { x: 38, z: 0 });
-  hud.drawMinimap(world, { x: 96, z: 2.5 }, -Math.PI / 2, blips, { x: -150, z: 138 },
+  blips.push({ x: 48, z: -6.8 }, { x: 48.5, z: 9.2 }, { x: 74, z: -1.5 }, { x: 39, z: 5.5 }, { x: 24, z: 0 });
+  hud.drawMinimap(world, { x: 56, z: 2.5 }, -Math.PI / 2, blips, { x: -150, z: 138 },
     world.starSpots.filter((s, i) => i % 2 === 0));
   void pd;
 }

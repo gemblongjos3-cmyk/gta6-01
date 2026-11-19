@@ -14,14 +14,20 @@ export function createHeroCar(scene) {
   ent.driver = 'player';
   ent.vx = 0; ent.vz = 0; ent.nitro = 1;
   const beamTex = glowTexture('rgba(255,240,200,0.9)', 'rgba(255,240,200,0)');
+  const coneGeo = new THREE.CylinderGeometry(1.5, 0.16, 9.5, 14, 1, true);
+  coneGeo.rotateX(Math.PI / 2);
+  const coneMat = new THREE.MeshBasicMaterial({ color: 0xffe9b0, transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
   for (const s of [-1, 1]) {
-    const spot = new THREE.SpotLight(0xffe9b0, 60, 42, 0.5, 0.5, 1.4);
+    const spot = new THREE.SpotLight(0xffe9b0, 240, 62, 0.55, 0.6, 1.1);
     spot.position.set(s * 0.6, 0.8, 2.1);
-    spot.target.position.set(s * 0.9, 0.2, 16);
+    spot.target.position.set(s * 0.9, 0.2, 18);
     ent.mesh.add(spot); ent.mesh.add(spot.target);
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: beamTex, transparent: true, opacity: 0.5, depthWrite: false }));
-    glow.position.set(s * 0.6, 0.72, 2.25); glow.scale.setScalar(1.1);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: beamTex, transparent: true, opacity: 0.8, depthWrite: false }));
+    glow.position.set(s * 0.6, 0.72, 2.25); glow.scale.setScalar(1.6);
     ent.mesh.add(glow);
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.set(s * 0.62, 0.58, 2.15 + 4.75); cone.renderOrder = 3;
+    ent.mesh.add(cone);
   }
   return ent;
 }

@@ -23,8 +23,8 @@ export function createAirUnit(scene) {
   const rotor2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 10.6), rotor.material);
   rotor2.position.y = 1.15; g.add(rotor2);
   for (const [sx, col] of [[-1.15, 0xff2038], [1.15, 0x38ff70]]) { // nav strobes on the skids
-    const st = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: col, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    st.position.set(sx, -1.1, 0); st.scale.setScalar(0.9); g.add(st);
+    const st = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: col, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    st.position.set(sx, -1.1, 0); st.scale.setScalar(1.35); g.add(st);
   }
   const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.4, 0.16), rotor.material);
   tailRotor.position.set(0.2, 0.7, -6.2); g.add(tailRotor);
@@ -35,10 +35,10 @@ export function createAirUnit(scene) {
     strut.position.set(s * 0.9, -0.75, 0.6); g.add(strut);
   }
   // searchlight: a real spotlight plus a visible cone and a pool of light
-  const spot = new THREE.SpotLight(0xcfe6ff, 900, 90, 0.32, 0.45, 1.2);
+  const spot = new THREE.SpotLight(0xcfe6ff, 1700, 95, 0.32, 0.45, 1.1);
   g.add(spot); g.add(spot.target);
   const cone = new THREE.Mesh(new THREE.ConeGeometry(6.4, 27, 20, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
   cone.position.y = -14.2; g.add(cone);
   const pool = new THREE.Mesh(new THREE.CircleGeometry(5.6, 20),
     new THREE.MeshBasicMaterial({ map: glowTexture('rgba(200,225,255,0.85)', 'rgba(200,225,255,0)'), transparent: true, depthWrite: false }));
