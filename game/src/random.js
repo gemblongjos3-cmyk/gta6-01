@@ -45,3 +45,5 @@ export function createRandom(seed) {
 
   return random;
 }
+
+// Round 5 note: the deterministic seed also places the FLAMINGO FM rooftop billboards.

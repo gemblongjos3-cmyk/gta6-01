@@ -94,3 +94,5 @@ export function createInput(target) {
     isDown: isHeld,
   };
 }
+
+// Round 5 note: Q is read as a held key by main.js for the weapon wheel; it needs no one-shot entry.

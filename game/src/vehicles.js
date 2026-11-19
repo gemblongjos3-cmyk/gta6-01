@@ -139,3 +139,5 @@ export function nearestCar(cars, x, y, radius) {
   }
   return best;
 }
+
+// Round 5 note: the sport model is the pink Vespera GT the story missions revolve around.

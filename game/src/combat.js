@@ -6,6 +6,18 @@ import { PLAYER } from './config.js';
 const BULLET_SPEED = 2100;
 const BULLET_LIFE = 0.42;
 
+/**
+ * The player's arsenal, lightest first. The pistol is carried from the
+ * first minute; the SMG and the scattergun are earned on the story —
+ * mission three pays out the WASP, mission five the MARLIN. One trigger
+ * pull costs one round from the magazine however many pellets it throws.
+ */
+export const WEAPONS = [
+  { id: 'pistol', name: 'Pistol', model: 'KESTREL 9', damage: 34, fireDelay: 0.26, spread: 0.03, pellets: 1, magazine: 12, reloadTime: 1.25, startReserve: 72 },
+  { id: 'smg', name: 'SMG', model: 'WASP 6149', damage: 16, fireDelay: 0.085, spread: 0.1, pellets: 1, magazine: 30, reloadTime: 1.5, startReserve: 90 },
+  { id: 'scatter', name: 'Scattergun', model: 'MARLIN 12', damage: 11, fireDelay: 0.8, spread: 0.26, pellets: 6, magazine: 6, reloadTime: 1.9, startReserve: 24 },
+];
+
 export function createCombat(world) {
   const bullets = [];
   const flashes = [];
@@ -13,6 +25,54 @@ export function createCombat(world) {
   const casings = [];
   const hitmarks = [];
   let shake = 0;
+
+  // The weapon shelf: per-weapon magazine and reserve counts, which one is
+  // in hand, and which have been earned. The live counts the player spends
+  // sit on the player state; main.js swaps them through here on a switch.
+  const weaponState = WEAPONS.map((def, i) => ({ def, mag: def.magazine, reserve: def.startReserve, unlocked: i === 0 }));
+  let currentWeapon = 0;
+
+  /** The weapon in hand: its definition plus its stored counts. */
+  function weapon() {
+    return weaponState[currentWeapon];
+  }
+
+  /** Put another earned weapon in hand. False when it is still locked. */
+  function selectWeapon(index) {
+    if (!weaponState[index] || !weaponState[index].unlocked) return false;
+    currentWeapon = index;
+    return true;
+  }
+
+  /** Earn a weapon (a story payout): it joins the wheel for good. */
+  function unlockWeapon(index) {
+    if (weaponState[index]) weaponState[index].unlocked = true;
+  }
+
+  /** Every weapon's shelf state, for the wheel and the slot strip. */
+  function weaponStates() {
+    return weaponState.map((entry, i) => ({ ...entry, active: i === currentWeapon }));
+  }
+
+  /** Force a weapon's exact state — the screenshot rig stages a loadout. */
+  function stageWeapon(index, mag, reserve) {
+    const entry = weaponState[index];
+    if (!entry) return;
+    entry.unlocked = true;
+    entry.mag = mag;
+    entry.reserve = reserve;
+    currentWeapon = index;
+  }
+
+  /** A fresh evening: pistol only, every magazine full. */
+  function resetWeapons() {
+    weaponState.forEach((entry, i) => {
+      entry.mag = entry.def.magazine;
+      entry.reserve = entry.def.startReserve;
+      entry.unlocked = i === 0;
+    });
+    currentWeapon = 0;
+  }
 
   function addBullet(x, y, angle, hostile, damage) {
     bullets.push({
@@ -163,6 +223,15 @@ export function createCombat(world) {
     shoot,
     spark,
     clear,
+    weapon,
+    selectWeapon,
+    unlockWeapon,
+    weaponStates,
+    stageWeapon,
+    resetWeapons,
+    get currentWeaponIndex() {
+      return currentWeapon;
+    },
     get shake() {
       return shake;
     },

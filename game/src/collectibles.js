@@ -80,3 +80,5 @@ export function createCollectibles(world, random) {
 
   return { stars, takenIds, load, remaining, update, placeStar };
 }
+
+// Round 5 note: Sunset Stars also pay +25 XP toward the RESPECT ladder (see main.js).

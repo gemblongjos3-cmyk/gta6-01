@@ -80,11 +80,11 @@ export function createMissions(world, random) {
       title: 'Borrowed Time',
       reward: 260,
       intro: [
-        'Luna: See the red coupe by the diner? Its owner owes us a favour.',
+        'Luna: See the pink Vespera coupe by the diner? Its owner owes us a favour.',
         'Luna: Borrow it. Bayline Garage will know what to do with it.',
       ],
       steps: [
-        { kind: 'steal', label: 'Take the red coupe parked by the diner' },
+        { kind: 'steal', label: 'Take the pink Vespera coupe by the diner' },
         { kind: 'garage', place: 'garage', label: 'Drive the coupe into Bayline Garage' },
       ],
     },
@@ -136,6 +136,32 @@ export function createMissions(world, random) {
         { kind: 'escort', place: 'marina', label: 'Drive the boss to the marina — stay ahead of the police', heat: 3 },
       ],
     },
+    {
+      id: 'paper-moon',
+      title: 'Paper Moon',
+      reward: 1200,
+      intro: [
+        'Luna: Pier Nine is holding a bag of money with our name on it.',
+        'Luna: The alarms are live and my scanner window is short. Grab it, lose them, bring it home.',
+      ],
+      steps: [
+        { kind: 'goto', place: 'warehouse', label: 'Pick up the money at Pier Nine', seconds: 90 },
+        { kind: 'evade', label: "Lose the cops before Luna's scanner window closes", seconds: 75, heat: 4 },
+        { kind: 'deliver', place: 'garage', label: 'Bring the money home — Bayline Garage' },
+      ],
+    },
+    {
+      id: 'star-run',
+      title: 'Star Run',
+      reward: 800,
+      intro: [
+        'Luna: A violet coupe has been telling the avenue it owns the night.',
+        'Luna: Six checkpoints around the Bayline block. Beat it through all of them.',
+      ],
+      steps: [
+        { kind: 'race', label: 'Star Run — beat the rival through six checkpoints', seconds: 150 },
+      ],
+    },
   ];
 
   // ------------------------------------------------------------------ state
@@ -182,11 +208,11 @@ export function createMissions(world, random) {
     return crew;
   }
 
-  /** The red coupe for mission two, parked in plain sight of the diner. */
+  /** The pink Vespera coupe for mission two, parked in plain sight of the diner. */
   function spawnCoupe(ctx) {
     const diner = world.place('diner');
     const spot = world.nearestRoadPoint(diner.door.x + 60, diner.door.y + 30, ROAD.width / 2 - 14, 1);
-    const car = buildStepCar(random, spot.x, spot.y, spot.axis === 'x' ? Math.PI / 2 : 0, '#e2574c', 'sport');
+    const car = buildStepCar(random, spot.x, spot.y, spot.axis === 'x' ? Math.PI / 2 : 0, '#ff4f9d', 'sport');
     ctx.cars.push(car);
     ctx.missionCar = car;
     return car;
@@ -220,8 +246,23 @@ export function createMissions(world, random) {
     return car;
   }
 
-  /** The boss: patient, well dressed, and entirely unwilling to walk. */
-  function spawnBoss(ctx) {
+  /** The rival coupe for the Star Run, and the six checkpoints it races. */
+  function spawnRival(ctx) {
+    const garage = world.place('garage');
+    const corners = circuitAround(garage.door.x, garage.door.y);
+    const midTop = { x: (corners[0].x + corners[1].x) / 2, y: corners[0].y };
+    const midBottom = { x: (corners[2].x + corners[3].x) / 2, y: corners[2].y };
+    const checkpoints = [corners[0], midTop, corners[1], corners[2], midBottom, corners[3]];
+    const start = checkpoints[0];
+    const car = buildStepCar(random, start.x, start.y + 60, 0, '#8f8bff', 'sport');
+    car.checkpoints = checkpoints;
+    car.wpIndex = 0;
+    ctx.cars.push(car);
+    ctx.missionCar = car;
+    return car;
+  }
+
+  /** The boss: patient, well dressed, and entirely unwilling to walk. */  function spawnBoss(ctx) {
     const diner = world.place('diner');
     const boss = {
       x: diner.door.x + 26,
@@ -272,6 +313,12 @@ export function createMissions(world, random) {
     else if (entry.kind === 'ram') stepState.spawned = spawnTailCar(ctx);
     else if (entry.kind === 'guns') stepState.spawned = spawnGunmen(ctx, entry);
     else if (entry.kind === 'escort') stepState.spawned = spawnBoss(ctx);
+    else if (entry.kind === 'race') {
+      stepState.spawned = spawnRival(ctx);
+      stepState.checkpoints = stepState.spawned.checkpoints;
+      stepState.playerCp = 0;
+      stepState.rivalCp = 0;
+    }
     return stepState;
   }
 
@@ -414,6 +461,26 @@ export function createMissions(world, random) {
       return;
     }
 
+    if (entry.kind === 'race') {
+      const car = stepState.spawned;
+      if (!car) return;
+      const points = stepState.checkpoints ?? [];
+      if (points.length === 0) return;
+      if (stepState.rivalCp < points.length) {
+        const goal = points[stepState.rivalCp % points.length];
+        const dx = goal.x - car.x;
+        const dy = goal.y - car.y;
+        if (Math.hypot(dx, dy) < 95) stepState.rivalCp += 1;
+        const desired = Math.atan2(dy, dx);
+        let delta = desired - car.angle;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        const throttle = car.speed < 380 ? 1 : 0.35;
+        stepCarPhysics(car, dt, { throttle, brake: 0, steer: Math.max(-1, Math.min(1, delta * 1.6)) }, world);
+      }
+      return;
+    }
+
     if (entry.kind === 'escort') {
       const boss = stepState.spawned;
       if (!boss || boss.dead) return;
@@ -505,6 +572,27 @@ export function createMissions(world, random) {
       if (ctx.police.wanted === 0) advanceStep(ctx);
       return;
     }
+    if (entry.kind === 'deliver') {
+      if (player.car && distance < ARRIVE_RADIUS + 30) advanceStep(ctx);
+      return;
+    }
+    if (entry.kind === 'race') {
+      const points = stepState.checkpoints ?? [];
+      if (points.length === 0) return;
+      if (stepState.playerCp < points.length) {
+        const goal = points[stepState.playerCp];
+        if (Math.hypot(player.x - goal.x, player.y - goal.y) < 115) {
+          stepState.playerCp += 1;
+          ctx.toast(`Checkpoint ${stepState.playerCp} of ${points.length}`, 1.6);
+        }
+      }
+      if (stepState.playerCp >= points.length) {
+        advanceStep(ctx);
+        return;
+      }
+      if (stepState.rivalCp >= points.length) fail(ctx);
+      return;
+    }
     if (entry.kind === 'escort') {
       const boss = stepState.spawned;
       if (boss && boss.dead) {
@@ -538,6 +626,11 @@ export function createMissions(world, random) {
     if (entry.kind === 'escort' && stepState.spawned && !stepState.spawned.riding) {
       return { x: stepState.spawned.x, y: stepState.spawned.y, label: 'Pick up the boss at the diner' };
     }
+    if (entry.kind === 'race') {
+      const points = stepState.checkpoints ?? [];
+      const goal = points[Math.min(stepState.playerCp ?? 0, points.length - 1)];
+      return goal ? { x: goal.x, y: goal.y, label: entry.label } : null;
+    }
     const point = stepPoint(entry);
     return point ? { x: point.x, y: point.y, label: entry.label } : null;
   }
@@ -555,6 +648,8 @@ export function createMissions(world, random) {
       return car ? `${Math.max(0, Math.round((car.health / TAIL_CAR_HEALTH) * 100))}% left` : '';
     }
     if (entry.kind === 'evade') return 'Lose every star';
+    if (entry.kind === 'deliver') return 'Keep the money moving';
+    if (entry.kind === 'race') return `Checkpoint ${stepState.playerCp ?? 0} of ${(stepState.checkpoints ?? []).length} · Rival ${stepState.rivalCp ?? 0}`;
     if (entry.kind === 'escort') return stepState.spawned?.riding ? 'Boss aboard' : 'Collect the boss';
     return '';
   }

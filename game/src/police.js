@@ -8,6 +8,7 @@ import { createCar, stepCarPhysics } from './vehicles.js';
 
 export function createPolice(world, random) {
   const cars = [];
+  const barricades = [];
   let wanted = 0;
   let quiet = 0;
   let bust = 0;
@@ -15,6 +16,8 @@ export function createPolice(world, random) {
   let wasted = false;
   let siren = 0;
   let spawnTimer = 0;
+  let roadblockTimer = 0;
+  let roadblockCount = 0;
 
   /** Add stars (never above five) and restart the quiet timer. */
   function commitCrime(stars, reason = '') {
@@ -42,7 +45,7 @@ export function createPolice(world, random) {
     const distance = 1200 + random() * 400;
     const x = Math.max(40, Math.min(world.width - 40, player.x + Math.cos(angle) * distance));
     const y = Math.max(40, Math.min(world.height - 40, player.y + Math.sin(angle) * distance));
-    const car = createCar(random, { x, y, kind: 'police', model: 'cruiser', color: '#e8eef5' });
+    const car = createCar(random, { x, y, kind: 'police', model: 'cruiser', color: '#23262e' });
     car.axis = 'x';
     car.dir = 1;
     car.laneCenter = y;
@@ -57,6 +60,50 @@ export function createPolice(world, random) {
   function retire(car) {
     const index = cars.indexOf(car);
     if (index >= 0) cars.splice(index, 1);
+  }
+
+  /**
+   * Throw a roadblock across the road at (x, y): two cruisers parked nose
+   * to tail across the lanes and a line of striped barricades between and
+   * beside them. `axisAngle` runs along the road — the block stands
+   * across it. The cruisers hold their ground; they never chase.
+   */
+  function spawnRoadblockAt(x, y, axisAngle) {
+    roadblockCount += 1;
+    const blockId = roadblockCount;
+    const units = [];
+    for (const offset of [-36, 36]) {
+      const car = createCar(random, {
+        x: x + Math.cos(axisAngle) * offset,
+        y: y + Math.sin(axisAngle) * offset,
+        angle: axisAngle + (offset < 0 ? 0.05 : -0.05),
+        kind: 'police',
+        model: 'cruiser',
+        color: '#23262e',
+      });
+      car.health = 220;
+      car.speed = 0;
+      car.roadblock = true;
+      car.blockId = blockId;
+      car.sirenPhase = random() * Math.PI * 2;
+      cars.push(car);
+      units.push(car);
+    }
+    for (const offset of [-78, 0, 78]) {
+      barricades.push({ x: x + Math.cos(axisAngle) * offset, y: y + Math.sin(axisAngle) * offset, angle: axisAngle, blockId });
+    }
+    siren = 1;
+    return units;
+  }
+
+  /** Retire one whole roadblock — both cruisers and their barricades. */
+  function retireRoadblock(blockId) {
+    for (let index = cars.length - 1; index >= 0; index -= 1) {
+      if (cars[index].blockId === blockId) cars.splice(index, 1);
+    }
+    for (let index = barricades.length - 1; index >= 0; index -= 1) {
+      if (barricades[index].blockId === blockId) barricades.splice(index, 1);
+    }
   }
 
   /** Want the police after all, as a scene setter (screenshots, scripted heat). */
@@ -108,10 +155,22 @@ export function createPolice(world, random) {
     if (wanted > 0) {
       quiet = 0;
       spawnTimer -= dt;
-      const alive = cars.length;
+      const alive = cars.filter((car) => !car.roadblock).length;
       if (spawnTimer <= 0 && alive < Math.min(POLICE.maxCars, wanted + 1)) {
         if (Math.hypot(player.x - target.x, player.y - target.y) < POLICE.chaseRadius) spawnCruiser(target);
         spawnTimer = 2.4 - wanted * 0.22;
+      }
+      // At full heat the department stops chasing and starts blocking:
+      // a roadblock across the road the player is running toward.
+      if (wanted >= POLICE.roadblockMinWanted) {
+        roadblockTimer -= dt;
+        const hasBlock = cars.some((car) => car.roadblock);
+        if (roadblockTimer <= 0 && !hasBlock) {
+          const heading = player.car ? player.car.angle : player.aim;
+          const ahead = world.nearestRoadPoint(target.x + Math.cos(heading) * 560, target.y + Math.sin(heading) * 560, 0, 1);
+          spawnRoadblockAt(ahead.x, ahead.y, ahead.axis === 'x' ? 0 : Math.PI / 2);
+          roadblockTimer = POLICE.roadblockCooldown;
+        }
       }
     } else {
       quiet += dt;
@@ -131,6 +190,13 @@ export function createPolice(world, random) {
     let closest = Infinity;
     for (const car of cars) {
       car.sirenPhase += dt * 9;
+      if (car.roadblock) {
+        // A block holds its ground until the player is long past it.
+        const blockDist = Math.hypot(car.x - target.x, car.y - target.y);
+        closest = Math.min(closest, blockDist);
+        if (blockDist > POLICE.roadblockRange) retireRoadblock(car.blockId);
+        continue;
+      }
       const distance = chase(car, target, dt);
       closest = Math.min(closest, distance);
       // A cruiser close behind fires at a player on foot.
@@ -178,6 +244,8 @@ export function createPolice(world, random) {
 
   function reset() {
     cars.length = 0;
+    barricades.length = 0;
+    roadblockTimer = 0;
     wanted = 0;
     quiet = 0;
     bust = 0;
@@ -187,6 +255,7 @@ export function createPolice(world, random) {
 
   return {
     cars,
+    barricades,
     get wanted() {
       return Math.ceil(wanted);
     },
@@ -200,6 +269,7 @@ export function createPolice(world, random) {
     setWanted,
     clearWanted,
     spawnPursuit,
+    spawnRoadblockAt,
     retire,
     update,
     takeBusted,

@@ -201,3 +201,5 @@ export function createTraffic(world, random) {
 
   return { cars, parked, skids, update, all, retire, spawnTrafficCar, spawnParkedCar };
 }
+
+// Round 5 note: traffic now shares the avenue with staged roadblocks at four stars.

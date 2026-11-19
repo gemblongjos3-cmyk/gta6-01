@@ -89,6 +89,7 @@ function pdStatusFor(car, focus, wanted, dist) {
   const aheadDot = dist > 0 ? ahead / dist : 0;
   const speed = Math.abs(car.speed ?? 0);
   if (aheadDot > 0.35 && dist < 700) return speed < 40 ? 'ROADBLOCK' : 'INTERCEPT';
+  if (dist < 300 && closing && speed > 200) return 'RAMMING';
   if (dist < 520) return 'PURSUIT';
   if (dist < 1200 && (closing || speed >= 40)) return 'CLOSING';
   if (dist < 1200) return 'PATROL';
@@ -102,9 +103,10 @@ function pdStatusFor(car, focus, wanted, dist) {
  * derived, not stored: wanted above zero AND the nearest unit within
  * 900 world px (90 m) of the player.
  */
-export function computePdResponse(cars, focus, wanted) {
+export function computePdResponse(cars, focus, wanted, extraUnits = []) {
   const list = (cars ?? []).filter((car) => car && car.kind === 'police');
-  if (list.length === 0 || !focus) return null;
+  const extras = (extraUnits ?? []).filter((unit) => unit && unit.name);
+  if ((list.length === 0 && extras.length === 0) || !focus) return null;
   // Names are assigned in first-seen (spawn) order before any sorting, so
   // the nearest-first display order can never rename a car.
   for (const car of list) pdNameFor(car);
@@ -113,13 +115,17 @@ export function computePdResponse(cars, focus, wanted) {
       const dist = Math.hypot(car.x - focus.x, car.y - focus.y);
       return { name: pdNames.get(car), status: pdStatusFor(car, focus, wanted, dist), distM: meters(dist), dist };
     })
+    .concat(extras.map((unit) => ({ name: unit.name, status: unit.status, distM: unit.distM, dist: unit.dist })))
     .sort((a, b) => a.dist - b.dist);
   const nearest = rows[0].dist;
   if (wanted <= 0 && nearest > 900) return null;
+  const shown = rows.slice(0, 5);
   return {
-    count: list.length,
+    count: list.length + extras.length,
+    code: Math.max(0, Math.round(wanted)),
     sight: wanted > 0 && nearest <= 900,
-    rows: rows.slice(0, 5).map(({ name, status, distM }) => ({ name, status, distM })),
+    more: rows.length - shown.length,
+    rows: shown.map(({ name, status, distM }) => ({ name, status, distM })),
   };
 }
 
@@ -151,7 +157,9 @@ export function createHud(world) {
     dossier: byId('dossier'),
     dossierHead: byId('dossierHead'),
     dossierObj: byId('dossierObj'),
+    dossierSub: byId('dossierSub'),
     dossierStage: byId('dossierStage'),
+    dossierStageLabel: byId('dossierStageLabel'),
     dossierNext: byId('dossierNext'),
     dossierTimer: byId('dossierTimer'),
     dossierDistrict: byId('dossierDistrict'),
@@ -159,6 +167,17 @@ export function createHud(world) {
     pdTitle: byId('pdTitle'),
     pdChip: byId('pdChip'),
     pdRows: byId('pdRows'),
+    pdFoot: byId('pdFoot'),
+    dayClock: byId('dayClock'),
+    progress: byId('progress'),
+    respectLabel: byId('respectLabel'),
+    respectFill: document.querySelector('#respectBar > i'),
+    xpLabel: byId('xpLabel'),
+    xpFill: document.querySelector('#xpBar > i'),
+    weaponSlots: byId('weaponSlots'),
+    wheel: byId('wheel'),
+    speedGear: byId('speedGear'),
+    carCondPct: byId('carCondPct'),
     dialogue: byId('dialogue'),
     dialogueText: byId('dialogueText'),
     radarLabel: byId('radarLabel'),
@@ -356,11 +375,12 @@ export function createHud(world) {
   function renderDossier() {
     if (!dossierState) return;
     const d = dossierState;
-    const key = [d.header, d.objective, d.stageFilled, d.stageTotal, d.stageIndex, d.next, d.timer, d.district].join('|');
+    const key = [d.header, d.objective, d.sub, d.stageFilled, d.stageTotal, d.stageIndex, d.next, d.timer, d.district].join('|');
     if (key === dossierKey) return;
     dossierKey = key;
     el.dossierHead.textContent = d.header ?? '';
     el.dossierObj.textContent = d.objective ?? '';
+    el.dossierSub.textContent = d.sub ?? '';
     el.dossierTimer.textContent = d.timer ?? '';
     el.dossierTimer.classList.toggle('late', typeof d.timer === 'string' && d.timer.startsWith('0:'));
     const total = Math.max(0, Math.round(d.stageTotal ?? 0));
@@ -373,6 +393,7 @@ export function createHud(world) {
       else if (i === current) seg.className = 'now';
       el.dossierStage.appendChild(seg);
     }
+    el.dossierStageLabel.textContent = total > 0 ? `STAGE ${current + 1}/${total}` : '';
     el.dossierNext.innerHTML = '';
     if (d.next) {
       const lead = document.createElement('span');
@@ -419,10 +440,10 @@ export function createHud(world) {
       animate(el.pdPanel, { autoAlpha: 0, x: -10, duration: 0.3, ease: 'power2.in' });
       return;
     }
-    const key = [data.count, data.sight, ...data.rows.map((row) => `${row.name}:${row.status}:${row.distM}`)].join('|');
+    const key = [data.count, data.code, data.sight, data.more, ...data.rows.map((row) => `${row.name}:${row.status}:${row.distM}`)].join('|');
     if (key === pdKey) return;
     pdKey = key;
-    el.pdTitle.textContent = `SHORES PD RESPONSE — ${data.count} ${data.count === 1 ? 'UNIT' : 'UNITS'}`;
+    el.pdTitle.textContent = `SHORES PD RESPONSE — ${data.count} ${data.count === 1 ? 'UNIT' : 'UNITS'}${data.code ? ` • CODE ${data.code}` : ''}`;
     el.pdChip.textContent = data.sight ? 'IN SIGHT' : 'EVADING';
     el.pdChip.className = `chip ${data.sight ? 'sight' : 'evade'}`;
     el.pdRows.innerHTML = '';
@@ -441,6 +462,7 @@ export function createHud(world) {
       line.append(unit, chip, dist);
       el.pdRows.appendChild(line);
     }
+    el.pdFoot.textContent = data.more > 0 ? `+${data.more} more ${data.more === 1 ? 'unit' : 'units'} on Tac-3 — break line of sight` : '';
     animate(el.pdPanel, { autoAlpha: 1, x: 0, duration: 0.35, ease: 'power2.out' });
   }
 
@@ -482,19 +504,21 @@ export function createHud(world) {
 
   // ----------------------------------------------------------- the speedometer
   /** Speed while driving; the whole cluster hides itself on foot. */
-  function setSpeed(value, name, driving) {
+  function setSpeed(value, name, driving, gear = '') {
     if (!driving) {
       animate(el.speedo, { autoAlpha: 0, y: 8, duration: 0.25 });
       return;
     }
     el.speedValue.textContent = `${Math.round(Math.abs(value))}`;
+    el.speedGear.textContent = gear ?? '';
     el.carName.textContent = name ?? '';
     animate(el.speedo, { autoAlpha: 1, y: 0, duration: 0.25 });
   }
 
   /**
    * The car's condition as four segments under its name: a quarter of the
-   * health lights one block, and the last block standing burns red.
+   * health lights one block, and the last block standing burns red. The
+   * exact percentage rides beside the segments.
    */
   function setCarCondition(health, maxHealth) {
     const max = maxHealth > 0 ? maxHealth : 1;
@@ -502,6 +526,86 @@ export function createHud(world) {
     const lit = Math.ceil(4 * frac);
     el.carCondSegs.forEach((seg, i) => seg.classList.toggle('lit', i < lit));
     el.carCond.classList.toggle('low', lit <= 1);
+    el.carCondPct.textContent = `${Math.round(frac * 100)}%`;
+  }
+
+  // ------------------------------------------------- clock and progress
+  /** The evening's clock, top right over the cash: DAY 1 · 18:52. */
+  function setClock(text) {
+    el.dayClock.textContent = text ?? '';
+  }
+
+  /**
+   * The standing bars under the radar: RESPECT (the level the city grants
+   * for work done) and XP filling toward the next one.
+   */
+  function setProgress({ respect = 1, xp = 0, xpNext = 150 } = {}) {
+    if (gsap) gsap.set(el.progress, { autoAlpha: 1 });
+    el.respectLabel.textContent = `RESPECT ${respect}`;
+    el.respectFill.style.width = `${Math.max(0, Math.min(100, (respect / 8) * 100))}%`;
+    el.xpLabel.textContent = `XP ${xp}/${xpNext}`;
+    el.xpFill.style.width = `${Math.max(0, Math.min(100, (xp / Math.max(1, xpNext)) * 100))}%`;
+  }
+
+  // ---------------------------------------------------- weapons display
+  let slotsKey = '';
+  /**
+   * The weapon slot strip under the stars of the top-right cluster: one
+   * slot per weapon in the arsenal, the held one lit, the unearned ones
+   * stamped LOCKED with the model name the player is working toward.
+   */
+  function setWeaponSlots(states) {
+    const key = (states ?? []).map((s) => `${s.def.model}:${s.unlocked ? 1 : 0}:${s.active ? 1 : 0}`).join('|');
+    if (key === slotsKey) return;
+    slotsKey = key;
+    if (gsap) gsap.set(el.weaponSlots, { autoAlpha: 1 });
+    el.weaponSlots.innerHTML = '';
+    for (const state of states ?? []) {
+      const slot = document.createElement('div');
+      slot.className = `slot${state.active ? ' active' : ''}${state.unlocked ? '' : ' locked'}`;
+      const model = document.createElement('span');
+      model.className = 'smodel';
+      model.textContent = state.def.model;
+      const tag = document.createElement('span');
+      tag.className = 'stag';
+      tag.textContent = state.unlocked ? state.def.name.toUpperCase() : 'LOCKED';
+      slot.append(model, tag);
+      el.weaponSlots.appendChild(slot);
+    }
+  }
+
+  let wheelOpen = false;
+  /**
+   * The weapon wheel: the arsenal arranged around a ring while Q is held.
+   * The segment under the pointer (or the held weapon, in a photograph)
+   * burns gold; locked segments stay dim with their LOCKED stamp.
+   */
+  function showWheel(states, selected = 0) {
+    wheelOpen = true;
+    el.wheel.innerHTML = '';
+    (states ?? []).forEach((state, i) => {
+      const seg = document.createElement('div');
+      seg.className = `wseg seg${i}${i === selected ? ' picked' : ''}${state.unlocked ? '' : ' locked'}`;
+      const model = document.createElement('div');
+      model.className = 'wmodel';
+      model.textContent = state.def.model;
+      const name = document.createElement('div');
+      name.className = 'wname';
+      name.textContent = state.unlocked ? state.def.name : 'LOCKED';
+      const ammo = document.createElement('div');
+      ammo.className = 'wammo';
+      ammo.textContent = state.unlocked ? `${state.mag} / ${state.reserve}` : '—';
+      seg.append(model, name, ammo);
+      el.wheel.appendChild(seg);
+    });
+    animate(el.wheel, { autoAlpha: 1, scale: 1, duration: 0.18, ease: 'power2.out' });
+  }
+
+  /** Fold the wheel away: the choice is made. */
+  function hideWheel() {
+    if (!wheelOpen) return;
+    wheelOpen = false;
+    animate(el.wheel, { autoAlpha: 0, scale: 0.94, duration: 0.15, ease: 'power2.in' });
   }
 
   // ------------------------------------------------------------------ radio
@@ -883,7 +987,7 @@ export function createHud(world) {
     hideStart();
     setRailActive(true);
     if (!gsap) return;
-    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#radio', '#radarLabel'];
+    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#radio', '#radarLabel', '#progress', '#weaponSlots'];
     if (staticMode) {
       gsap.set(groups, { autoAlpha: 1, y: 0 });
       return;
@@ -894,7 +998,7 @@ export function createHud(world) {
   /** Hide every HUD group at once (the start screen owns the frame). */
   function hideHud() {
     setRailActive(false);
-    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective', '#speedo', '#missionTag', '#toast', '#hint', '#radio', '#radarLabel'];
+    const groups = ['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective', '#speedo', '#missionTag', '#toast', '#hint', '#radio', '#radarLabel', '#progress', '#weaponSlots', '#wheel'];
     if (gsap) gsap.set(groups, { autoAlpha: 0 });
   }
 
@@ -927,6 +1031,11 @@ export function createHud(world) {
     setDistrict,
     setSpeed,
     setCarCondition,
+    setClock,
+    setProgress,
+    setWeaponSlots,
+    showWheel,
+    hideWheel,
     setRadio,
     banner,
     endBanner,

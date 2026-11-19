@@ -406,6 +406,7 @@ export function createRenderer(canvas) {
     if (prop.kind === 'umbrella') return paintUmbrella(prop);
     if (prop.kind === 'towel') return paintTowel(prop);
     if (prop.kind === 'kiosk') return paintKiosk(prop);
+    if (prop.kind === 'billboard') return paintBillboard(prop);
     if (prop.kind === 'hydrant') {
       ctx.fillStyle = '#c94f43';
       ctx.fillRect(prop.x - 4, prop.y - 7, 8, 12);
@@ -416,6 +417,40 @@ export function createRenderer(canvas) {
     ctx.fillStyle = '#7a5c40';
     ctx.fillRect(prop.x - 14, prop.y - 4, 28, 5);
     ctx.fillRect(prop.x - 14, prop.y + 3, 28, 3);
+    return undefined;
+  }
+
+  /**
+   * A rooftop billboard: a pink board the size of a bus on two posts,
+   * lettered for the station half the city is listening to. Painted flat
+   * over the roof it stands on, the way the game's signs all lie.
+   */
+  function paintBillboard(prop) {
+    const w = prop.w ?? 190;
+    const h = prop.h ?? 58;
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath();
+    ctx.roundRect(prop.x - w / 2 + 7, prop.y - h / 2 + 9, w, h, 8);
+    ctx.fill();
+    ctx.fillStyle = '#4a3b30';
+    ctx.fillRect(prop.x - w / 4 - 4, prop.y + h / 2 - 3, 8, 12);
+    ctx.fillRect(prop.x + w / 4 - 4, prop.y + h / 2 - 3, 8, 12);
+    const grad = ctx.createLinearGradient(prop.x, prop.y - h / 2, prop.x, prop.y + h / 2);
+    grad.addColorStop(0, '#ff7ab8');
+    grad.addColorStop(1, '#e2547c');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(prop.x - w / 2, prop.y - h / 2, w, h, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,244,228,0.9)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#2b1030';
+    ctx.font = `900 29px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillText(prop.text ?? '', prop.x, prop.y + 1);
+    ctx.font = `700 12px ${FONT}`;
+    ctx.fillText(prop.sub ?? '', prop.x, prop.y + 20);
     return undefined;
   }
 
@@ -1027,6 +1062,126 @@ export function createRenderer(canvas) {
     void time;
   }
 
+  // ------------------------------------------------- roadblocks and air
+  /**
+   * One roadblock barricade: an orange board with white diagonal stripes
+   * on two feet, and a small amber beacon that blinks with the sirens.
+   */
+  function drawBarricades(list, time) {
+    for (const barricade of list ?? []) {
+      if (!visible(barricade.x, barricade.y, 90)) continue;
+      ctx.save();
+      ctx.translate(barricade.x, barricade.y);
+      ctx.rotate(barricade.angle);
+      groundShadow(2, 7, 32, 8);
+      ctx.fillStyle = '#3a3542';
+      ctx.fillRect(-24, 3, 5, 11);
+      ctx.fillRect(19, 3, 5, 11);
+      ctx.fillStyle = '#e86a2a';
+      ctx.beginPath();
+      ctx.roundRect(-31, -8, 62, 13, 3);
+      ctx.fill();
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(-31, -8, 62, 13, 3);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(255,244,228,0.92)';
+      for (let stripe = -3; stripe < 4; stripe += 1) {
+        ctx.save();
+        ctx.translate(stripe * 16, 0);
+        ctx.rotate(0.6);
+        ctx.fillRect(-3.4, -12, 6.8, 22);
+        ctx.restore();
+      }
+      ctx.restore();
+      if (Math.sin(time * 7 + barricade.x) > 0) {
+        ctx.fillStyle = '#ffb02e';
+        ctx.beginPath();
+        ctx.arc(0, -13, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  /**
+   * The air unit: a pool of spotlight on the street where its lamp holds,
+   * a soft beam up to the fuselage, and the helicopter itself — dark body,
+   * blue band, spinning rotor drawn screen-flat so it reads at any angle.
+   */
+  function drawAirUnit(u, time) {
+    if (!u || !u.active) return;
+    if (!visible(u.x, u.y, 760)) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const pool = ctx.createRadialGradient(u.spotX, u.spotY, 6, u.spotX, u.spotY, 98);
+    pool.addColorStop(0, 'rgba(255,240,190,0.32)');
+    pool.addColorStop(1, 'rgba(255,240,190,0)');
+    ctx.fillStyle = pool;
+    ctx.fillRect(u.spotX - 100, u.spotY - 100, 200, 200);
+    ctx.strokeStyle = 'rgba(255,240,190,0.10)';
+    ctx.lineWidth = 44;
+    ctx.beginPath();
+    ctx.moveTo(u.x, u.y);
+    ctx.lineTo(u.spotX, u.spotY);
+    ctx.stroke();
+    ctx.restore();
+    groundShadow(u.x + 48, u.y + 62, 46, 15);
+    ctx.save();
+    ctx.translate(u.x, u.y);
+    ctx.rotate(u.angle);
+    ctx.fillStyle = '#20242c';
+    ctx.beginPath();
+    ctx.roundRect(-66, -5, 46, 10, 5);
+    ctx.fill();
+    ctx.fillRect(-68, -13, 8, 26);
+    ctx.strokeStyle = '#12141a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-18, -14);
+    ctx.lineTo(24, -14);
+    ctx.moveTo(-18, 14);
+    ctx.lineTo(24, 14);
+    ctx.stroke();
+    ctx.fillStyle = '#2b3038';
+    ctx.beginPath();
+    ctx.roundRect(-27, -15, 58, 30, 13);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(95,178,255,0.85)';
+    ctx.fillRect(-27, -3, 58, 6);
+    ctx.fillStyle = PALETTE.glass;
+    ctx.beginPath();
+    ctx.roundRect(13, -10, 14, 20, 6);
+    ctx.fill();
+    ctx.fillStyle = '#f2f6fc';
+    ctx.font = `800 10px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('PD', -4, 3.5);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(u.x, u.y);
+    ctx.rotate(u.rotor);
+    ctx.strokeStyle = 'rgba(230,236,244,0.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-54, 0);
+    ctx.lineTo(54, 0);
+    ctx.stroke();
+    ctx.rotate(Math.PI / 2);
+    ctx.strokeStyle = 'rgba(230,236,244,0.22)';
+    ctx.beginPath();
+    ctx.moveTo(-54, 0);
+    ctx.lineTo(54, 0);
+    ctx.stroke();
+    ctx.restore();
+    if (Math.sin(time * 6) > 0) {
+      ctx.fillStyle = '#ff5b5b';
+      ctx.beginPath();
+      ctx.arc(u.x - 4, u.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   // ------------------------------------------------------- sunset stars
   /**
    * The Sunset Stars still standing: a gold palm-star turning slowly over a soft ring of
@@ -1164,6 +1319,8 @@ export function createRenderer(canvas) {
     drawActor,
     drawPlayer,
     drawEffects,
+    drawBarricades,
+    drawAirUnit,
     drawStars,
     drawMarker,
     drawObjectiveArrow,

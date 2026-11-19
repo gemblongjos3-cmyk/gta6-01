@@ -239,6 +239,34 @@ export function createWorld(random) {
   const warehousePlace = places.get('warehouse');
   if (warehousePlace) props.push({ kind: 'kiosk', x: warehousePlace.door.x + 176, y: COAST.beachTop + 46 });
 
+  // Rooftop billboards for the city's loudest radio station: one over the
+  // downtown junction the chase runs through, one over the Pier Nine
+  // warehouse roof. A pink board the size of a bus, lit against the dusk —
+  // the landmark every driver in the district navigates by.
+  function rooftopBillboard(anchorX, anchorY) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (const building of buildings) {
+      const distance = (building.cx - anchorX) ** 2 + (building.cy - anchorY) ** 2;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = building;
+      }
+    }
+    if (!best) return;
+    props.push({
+      kind: 'billboard',
+      x: best.cx,
+      y: best.cy,
+      w: Math.min(210, best.w - 8),
+      h: 58,
+      text: 'FLAMINGO FM',
+      sub: 'WAVE 88.1',
+    });
+  }
+  rooftopBillboard((ROAD.avenueX[3] + ROAD.avenueX[4]) / 2, (ROAD.streetY[1] + ROAD.streetY[2]) / 2);
+  if (warehousePlace) rooftopBillboard(warehousePlace.building.cx, warehousePlace.building.cy);
+
   solids.push({ x: 0, y: COAST.waterline, w: WORLD.width, h: WORLD.height - COAST.waterline, kind: 'sea' });
 
   const grid = {

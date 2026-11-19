@@ -16,6 +16,7 @@ export function createPlayer(world) {
     money: 250,
     ammo: PLAYER.magazine,
     reserve: PLAYER.maxAmmo,
+    magazineSize: PLAYER.magazine,
     reloading: 0,
     fireCooldown: 0,
     car: null,
@@ -44,7 +45,7 @@ export function createPlayer(world) {
     if (player.reloading > 0) {
       player.reloading -= dt;
       if (player.reloading <= 0) {
-        const need = PLAYER.magazine - player.ammo;
+        const need = player.magazineSize - player.ammo;
         const load = Math.min(need, player.reserve);
         player.ammo += load;
         player.reserve -= load;

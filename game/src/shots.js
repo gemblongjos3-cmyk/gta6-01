@@ -23,6 +23,7 @@ function placeCar(ctx, spec) {
   car.dir = Math.cos(car.angle) >= 0 ? 1 : -1;
   car.laneCenter = car.axis === 'x' ? car.y : car.x;
   car.cruise = spec.cruise ?? 150;
+  car.speed = spec.speed ?? 0;
   if (spec.kind === 'police') {
     car.sirenPhase = spec.sirenPhase ?? 1.3;
     car.health = 160;
@@ -67,22 +68,24 @@ export function stageShot(name, ctx) {
       angle: -Math.PI / 2,
       kind: 'player',
       model: 'sport',
-      color: '#e2574c',
+      color: '#ff4f9d',
     });
     car.speed = 250;
     car.driver = 'player';
-    car.health = 88;
+    car.health = 98;
     traffic.cars.push(car);
     player.car = car;
     player.x = car.x;
     player.y = car.y;
     player.aim = -Math.PI / 2;
 
-    // Three cruisers closing from the south, light bars on.
+    // Four cruisers closing from the south, light bars on, the two
+    // nearest already at ramming speed.
     const cruisers = [
-      { x: avenue + 30, y: street + 430, angle: -Math.PI / 2, phase: 0.4 },
-      { x: avenue - 44, y: street + 500, angle: -Math.PI / 2 + 0.18, phase: 2.1 },
-      { x: avenue + 96, y: street + 590, angle: -Math.PI / 2 - 0.12, phase: 3.4 },
+      { x: avenue + 30, y: street + 430, angle: -Math.PI / 2, phase: 0.4, speed: 280 },
+      { x: avenue - 44, y: street + 500, angle: -Math.PI / 2 + 0.18, phase: 2.1, speed: 280 },
+      { x: avenue + 96, y: street + 590, angle: -Math.PI / 2 - 0.12, phase: 3.4, speed: 190 },
+      { x: avenue - 90, y: street + 665, angle: -Math.PI / 2 + 0.3, phase: 4.6, speed: 190 },
     ];
     const stagedCruisers = [];
     for (const cruiser of cruisers) {
@@ -92,10 +95,15 @@ export function stageShot(name, ctx) {
         angle: cruiser.angle,
         kind: 'police',
         model: 'cruiser',
-        color: '#e8eef5',
+        color: '#23262e',
         sirenPhase: cruiser.phase,
+        speed: cruiser.speed,
       }));
     }
+    // And the trap ahead: a roadblock across the avenue, barricades out.
+    const blockUnits = police.spawnRoadblockAt(avenue + 16, street - 170, 0);
+    // The air unit overhead, its spotlight holding the pink coupe.
+    ctx.airUnit.stage(avenue + 170, street + 30, car);
     police.setWanted(4);
 
     // Ordinary traffic on the crossing street and up ahead, so the city reads as alive.
@@ -149,48 +157,62 @@ export function stageShot(name, ctx) {
       traffic.skids.push({ x: car.x - Math.sin(car.angle) * (30 + back * 26) + 12, y: car.y + 34 + back * 24, angle: car.angle, life: 2.6 - back * 0.3 });
     }
 
-    player.health = 74;
-    player.money = 1840;
+    player.health = 92;
+    player.money = 38420;
+    combat.stageWeapon(1, 24, 90);
+    player.ammo = 24;
+    player.reserve = 90;
     hud.setWanted(4);
-    hud.setCash(1840);
-    hud.setHealth(74, PLAYER.health);
-    hud.setAmmo(9, 36, PLAYER.magazine);
-    hud.setObjective('Heat Line · Mission 5 of 6', 'Shake the police — get the wanted level to zero', '1:12');
+    hud.setCash(38420);
+    hud.setHealth(92, PLAYER.health);
+    hud.setWeapon('SMG');
+    hud.setAmmo(24, 90, 30);
+    hud.setWeaponSlots(combat.weaponStates());
+    hud.setClock('DAY 1 · 18:52');
+    hud.setProgress({ respect: 4, xp: 438, xpNext: 1200 });
+    hud.setObjective('Paper Moon · Mission 7 of 8', "Lose the cops before Luna's scanner window closes", '2:06');
     hud.setMissionTag('Sunset Avenue · Downtown');
-    hud.setSpeed(112, 'Sprint Coupe', true);
+    hud.setSpeed(151, 'Vespera GT', true, 'D4');
     hud.setCarCondition(car.health, car.maxHealth ?? CAR.health);
-    hud.setRadio('PALM 98.7 · SALTLINE', 'Coral Static', 'Velvet Gulls');
-    hud.toast('Wanted 4 — the whole precinct is on you', 9);
+    hud.setRadio('WAVE 88.1 · NEON DRIVE', 'Pink Horizon', 'Lumen Kids');
+    hud.toast('');
     hud.hint('');
-    // The rail, staged from the same state: dossier for mission 5 (stage
-    // bar = Heat Line's own steps), the PD panel computed from the three
-    // staged cruisers by the live play function, and Luna's line.
-    const marker = { x: avenue + 34, y: street - 900 };
+    // The rail, staged from the same state: the Paper Moon dossier on its
+    // second stage, the PD panel computed from all six staged cruisers
+    // plus the air unit by the live play function, and Luna's line.
+    const garageDoor = world.place('garage').door;
+    const marker = { x: garageDoor.x, y: garageDoor.y };
     hud.setDossier({
-      header: 'HEAT LINE · MISSION 5 OF 6',
-      objective: 'Shake the police — get the wanted level to zero',
-      stageFilled: 0,
-      stageTotal: ctx.missions.script[4].steps.length,
-      stageIndex: 0,
-      next: ctx.missions.script[5].title,
-      timer: '1:12',
+      header: 'CH 7 — PAPER MOON',
+      objective: "Lose the cops before Luna's scanner window closes",
+      sub: 'They can see you — break line of sight',
+      stageFilled: 1,
+      stageTotal: ctx.missions.script[6].steps.length,
+      stageIndex: 1,
+      next: 'Bring the money home — Bayline Garage',
+      timer: '2:06',
       district: 'Sunset Avenue · Downtown',
     });
-    hud.setResponse(computePdResponse(stagedCruisers, { x: car.x, y: car.y, heading: -Math.PI / 2 }, 4));
-    hud.say('Whole precinct is rolling behind you. Keep the avenue — do not let them box you in.');
+    hud.setResponse(computePdResponse(
+      [...stagedCruisers, ...blockUnits],
+      { x: car.x, y: car.y, heading: -Math.PI / 2 },
+      4,
+      [ctx.airUnit.panelUnit({ x: car.x, y: car.y })],
+    ));
+    hud.say("Alarms are back! You've got the whole department coming — lose them!");
     hud.setDistrict('DOWNTOWN');
     return {
       wanted: 4,
       marker,
-      speed: 112,
-      carName: 'Sprint Coupe',
+      speed: 151,
+      carName: 'Vespera GT',
       radar: {
         x: car.x,
         y: car.y,
         aim: -Math.PI / 2,
         rotate: 0,
         route: computeRoute(car, marker),
-        police: stagedCruisers,
+        police: [...stagedCruisers, ...blockUnits],
         traffic: traffic.cars.filter((other) => other.kind !== 'police'),
       },
       bannerVisible: false,
@@ -259,8 +281,8 @@ export function stageShot(name, ctx) {
 
     // Two cruisers rolling along the promenade, still a way off.
     const stagedCruisers = [
-      placeCar(ctx, { x: door.x + 420, y: COAST.beachTop - 30, angle: Math.PI, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 0.6 }),
-      placeCar(ctx, { x: door.x - 380, y: COAST.beachTop - 30, angle: 0, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 2.8 }),
+      placeCar(ctx, { x: door.x + 420, y: COAST.beachTop - 30, angle: Math.PI, kind: 'police', model: 'cruiser', color: '#23262e', sirenPhase: 0.6 }),
+      placeCar(ctx, { x: door.x - 380, y: COAST.beachTop - 30, angle: 0, kind: 'police', model: 'cruiser', color: '#23262e', sirenPhase: 2.8 }),
     ];
     placeCar(ctx, { x: door.x + 290, y: COAST.beachTop + 24, angle: Math.PI / 2, kind: 'traffic', color: '#8a6fc0', model: 'van' });
     police.setWanted(2);
@@ -272,19 +294,29 @@ export function stageShot(name, ctx) {
     hud.setWanted(2);
     hud.setCash(3120);
     hud.setHealth(82, PLAYER.health);
-    hud.setAmmo(7, 24, PLAYER.magazine);
-    hud.setObjective('Pier Nine · Mission 4 of 6', 'Clear the warehouse yard — 3 targets', '0:37');
+    combat.stageWeapon(1, 24, 90);
+    player.ammo = 24;
+    player.reserve = 90;
+    hud.setWeapon('SMG');
+    hud.setAmmo(24, 90, 30);
+    hud.setWeaponSlots(combat.weaponStates());
+    hud.showWheel(combat.weaponStates(), 1);
+    hud.setClock('DAY 1 · 19:24');
+    hud.setProgress({ respect: 3, xp: 210, xpNext: 400 });
+    hud.setObjective('Pier Nine · Mission 4 of 8', 'Clear the warehouse yard — 3 targets', '0:37');
     hud.setMissionTag('Pier Nine · Shrimp Row');
     hud.setSpeed(0, '', false);
     hud.setRadio(null);
     hud.toast('Shots fired — the whole pier heard it', 9);
     hud.hint('');
     // The rail: mission 4's dossier, the PD panel from the two staged
-    // cruisers (wanted 2), Luna's warning.
+    // cruisers (wanted 2), Luna's warning. The weapon wheel hangs open
+    // over the yard: the WASP in hand, the MARLIN still locked away.
     const marker = { x: door.x + 30, y: door.y + 40 };
     hud.setDossier({
-      header: 'PIER NINE · MISSION 4 OF 6',
+      header: 'CH 4 — PIER NINE',
       objective: 'Clear the warehouse yard — 3 targets',
+      sub: 'Armed hands in the yard — watch the corners',
       stageFilled: 0,
       stageTotal: ctx.missions.script[3].steps.length,
       stageIndex: 0,
@@ -365,7 +397,7 @@ export function stageShot(name, ctx) {
     }
     police.setWanted(1);
     const stagedCruisers = [
-      placeCar(ctx, { x: avenue - 34, y: street - 880, angle: Math.PI / 2, kind: 'police', model: 'cruiser', color: '#e8eef5', sirenPhase: 1.1 }),
+      placeCar(ctx, { x: avenue - 34, y: street - 880, angle: Math.PI / 2, kind: 'police', model: 'cruiser', color: '#23262e', sirenPhase: 1.1 }),
     ];
 
     camera.x = avenue - 190;
@@ -378,19 +410,24 @@ export function stageShot(name, ctx) {
     hud.setWanted(1);
     hud.setCash(960);
     hud.setHealth(96, PLAYER.health);
+    hud.setWeapon('Pistol');
     hud.setAmmo(12, 48, PLAYER.magazine);
-    hud.setObjective('Borrowed Time · Mission 2 of 6', 'Deliver the package to Bayline Garage', '0:48');
+    hud.setWeaponSlots(combat.weaponStates());
+    hud.setClock('DAY 1 · 19:05');
+    hud.setProgress({ respect: 2, xp: 90, xpNext: 250 });
+    hud.setObjective('Borrowed Time · Mission 2 of 8', 'Deliver the package to Bayline Garage', '0:48');
     hud.setMissionTag(`${distM} m · Bayline`);
-    hud.setSpeed(74, 'Cargo Van', true);
+    hud.setSpeed(74, 'Cargo Van', true, 'D3');
     hud.setCarCondition(van.health, van.maxHealth ?? CAR.health);
-    hud.setRadio('PALM 98.7 · SALTLINE', 'Coral Static', 'Velvet Gulls');
+    hud.setRadio('WAVE 88.1 · NEON DRIVE', 'Neon Drive', 'Saltline Hearts');
     hud.toast(`Checkpoint in ${distM} m — keep it rolling`, 9);
     hud.hint('');
     // The rail: mission 2 on its second step (the steal is done, the
     // garage run is live), the PD panel from the one staged cruiser, Luna.
     hud.setDossier({
-      header: 'BORROWED TIME · MISSION 2 OF 6',
+      header: 'CH 2 — BORROWED TIME',
       objective: 'Deliver the package to Bayline Garage',
+      sub: 'The clock is running — Bayline before it runs out',
       stageFilled: 1,
       stageTotal: ctx.missions.script[1].steps.length,
       stageIndex: 1,
@@ -451,7 +488,7 @@ export function stageShot(name, ctx) {
     // finished animation, never its first frame.
     const entrance = hud.enterStart();
     if (entrance) entrance.progress(1);
-    gsap.set(['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective'], { autoAlpha: 0 });
+    gsap.set(['#wanted', '#cash', '#vitals', '#minimapWrap', '#weapon', '#objective', '#progress', '#weaponSlots', '#wheel'], { autoAlpha: 0 });
     gsap.set('#start', { autoAlpha: 1, visibility: 'visible' });
     gsap.set('#startPanel', { autoAlpha: 1, y: 0, scale: 1 });
     gsap.set('#title', { autoAlpha: 1, y: 0, letterSpacing: '-1px' });

@@ -146,3 +146,5 @@ export function createPedestrians(world, random) {
 
   return { people, update, panicNear, fall, spawnOne };
 }
+
+// Round 5 note: pedestrians share the streets with roadblocks and the air unit spotlight now.

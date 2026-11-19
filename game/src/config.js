@@ -98,12 +98,18 @@ export const POLICE = {
   bustTime: 2.6,
   heatDecayDelay: 9,
   heatDecayRate: 0.09,
+  /** The air unit joins the hunt at this heat and shadows the player from above. */
+  heliMinWanted: 3,
+  /** Roadblocks are thrown across the road ahead at this heat. */
+  roadblockMinWanted: 4,
+  roadblockCooldown: 16,
+  roadblockRange: 980,
 };
 
 /** Colours of the sunset city: warm pastels for the walls, teal and coral neon for the signs. */
 export const PALETTE = {
-  skyTop: '#3d3b6b',
-  skyMid: '#c75d6b',
+  skyTop: '#37306b',
+  skyMid: '#cf4f74',
   skyWarm: '#ff9e5e',
   skyDeep: '#7b3f78',
   vignette: 'rgba(28, 16, 44, 0.55)',

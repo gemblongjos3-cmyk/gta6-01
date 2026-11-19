@@ -17,6 +17,7 @@ import { createPedestrians } from './pedestrians.js';
 import { createPlayer } from './player.js';
 import { createPolice } from './police.js';
 import { createCombat } from './combat.js';
+import { createAirUnit } from './airunit.js';
 import { createMissions } from './missions.js';
 import { createCollectibles } from './collectibles.js';
 import { createAudio } from './audio.js';
@@ -37,6 +38,7 @@ const pedestrians = createPedestrians(world, random);
 const player = createPlayer(world);
 const police = createPolice(world, random);
 const combat = createCombat(world);
+const airUnit = createAirUnit();
 const missions = createMissions(world, random);
 const collectibles = createCollectibles(world, random);
 const audio = createAudio();
@@ -63,11 +65,12 @@ let hiddenTime = 0; // seconds spent out of police sight, for heat decay
 let toastQueue = []; // mission intro lines waiting their turn
 let dialogueTimer = 0; // seconds until the next queued line may show
 
-// The radio never changes station, only songs: one track every ~8 s of play.
-const RADIO_STATION = 'PALM 98.7 · SALTLINE';
+// The radio lives on one station all evening, WAVE 88.1: only the songs
+// change, one track every ~8 s of play.
+const RADIO_STATION = 'WAVE 88.1 · NEON DRIVE';
 const RADIO_TRACKS = [
-  ['Coral Static', 'Velvet Gulls'],
-  ['Salt on the Wind', 'The Breakwaters'],
+  ['Pink Horizon', 'Lumen Kids'],
+  ['Neon Drive', 'Saltline Hearts'],
   ['Ultraviolet Hour', 'Marina Lights'],
 ];
 let radioIndex = 0;
@@ -96,6 +99,24 @@ let pdTimer = 0; // the PD panel recomputes at ~5 Hz, not every frame
 let lastHudWanted = 0;
 let nearStepKey = '';
 let nearSaid = false;
+let wheelShown = false; // the weapon wheel is up (Q held)
+let wheelSelected = 0; // the segment the pointer is resting on
+let lastWeaponName = '';
+
+// Respect and XP: the city's standing, earned by work — a mission pays
+// 150, a Sunset Star 25 — and levelled on a short ladder. Level 4 at 800
+// is where the avenue starts using your name.
+const XP_LEVELS = [0, 150, 400, 800, 1300, 1900, 2600, 3400, 4400];
+let xp = 0;
+
+/** The HUD's progress reading: the respect level and the fill toward the next. */
+function xpProgress() {
+  let level = 0;
+  while (level < XP_LEVELS.length - 1 && xp >= XP_LEVELS[level + 1]) level += 1;
+  const floor = XP_LEVELS[level];
+  const next = XP_LEVELS[Math.min(level + 1, XP_LEVELS.length - 1)];
+  return { respect: level + 1, xp: xp - floor, xpNext: Math.max(1, next - floor) };
+}
 
 /** Every car standing in the world, whatever system spawned it. */
 function allCars() {
@@ -138,6 +159,7 @@ function writeSave() {
       completed: missions.completed,
       money: player.state.money,
       stars: collectibles.takenIds(),
+      xp,
     }));
   } catch {
     // A browser that refuses storage still gets a game; it just forgets.
@@ -153,6 +175,7 @@ function resetSave() {
   missions.load({ completed: 0 });
   collectibles.load([]);
   player.state.money = 250;
+  xp = 0;
 }
 
 // ------------------------------------------------------------- mission flow
@@ -180,11 +203,24 @@ function beginMission(at = null) {
 function completeMission(finished) {
   if (finished) {
     player.addMoney(finished.reward);
+    xp += 150;
     audio.cash();
     audio.missionJingle();
     hud.banner('Mission Passed', `${finished.title} · +$${finished.reward}`, '');
     hud.say(LUNA_DONE[lunaDoneIndex % LUNA_DONE.length]);
     lunaDoneIndex += 1;
+    // Story payouts on the weapon shelf: the third job earns the SMG,
+    // the fifth the scattergun. Luna announces both like deliveries.
+    if (missions.completed >= 3 && !combat.weaponStates()[1].unlocked) {
+      combat.unlockWeapon(1);
+      hud.say('A package for you at the garage: one WASP 6149. Hold Q and pick it up.');
+      hud.toast('New weapon — WASP 6149 SMG (hold Q)', 3.6);
+    }
+    if (missions.completed >= 5 && !combat.weaponStates()[2].unlocked) {
+      combat.unlockWeapon(2);
+      hud.say('And the MARLIN 12 scattergun is yours. Try not to redecorate the marina.');
+      hud.toast('New weapon — MARLIN 12 scattergun (hold Q)', 3.6);
+    }
   }
   writeSave();
   if (missions.finished) {
@@ -211,7 +247,36 @@ function reportCrime(stars) {
 }
 
 // ---------------------------------------------------------------- shooting
-/** Fire the pistol if the trigger, the magazine and the clock all agree. */
+/** Bank the live counts back onto the shelf weapon they belong to. */
+function stashWeapon() {
+  const shelf = combat.weapon();
+  shelf.mag = player.state.ammo;
+  shelf.reserve = player.state.reserve;
+}
+
+/** Load the shelf weapon in hand into the player's hands and HUD. */
+function applyWeapon() {
+  const shelf = combat.weapon();
+  const p = player.state;
+  p.ammo = shelf.mag;
+  p.reserve = shelf.reserve;
+  p.magazineSize = shelf.def.magazine;
+  p.reloading = 0;
+  hud.setWeapon(shelf.def.name);
+  lastWeaponName = shelf.def.name;
+}
+
+/** Switch to another shelf weapon, counts and all; locked ones refuse. */
+function switchWeapon(index) {
+  stashWeapon();
+  if (!combat.selectWeapon(index)) {
+    hud.toast('Locked — the story pays that one out later', 1.8);
+    return;
+  }
+  applyWeapon();
+}
+
+/** Fire the held weapon if the trigger, the magazine and the clock agree. */
 function playerShoot() {
   const p = player.state;
   if (p.car || p.reloading > 0 || p.fireCooldown > 0) return;
@@ -219,9 +284,13 @@ function playerShoot() {
     startReload();
     return;
   }
+  const def = combat.weapon().def;
   p.ammo -= 1;
-  p.fireCooldown = PLAYER.fireDelay;
-  combat.shoot(p.x, p.y, p.aim, { hostile: false, damage: 34 });
+  stashWeapon();
+  p.fireCooldown = def.fireDelay;
+  for (let pellet = 0; pellet < def.pellets; pellet += 1) {
+    combat.shoot(p.x, p.y, p.aim, { hostile: false, damage: def.damage, spread: def.spread });
+  }
   audio.gunshot();
   pedestrians.panicNear(p.x, p.y, 300);
   reportCrime(CRIME.gunshot);
@@ -231,8 +300,8 @@ function playerShoot() {
 /** R: swap the magazine; empty reserves just click. */
 function startReload() {
   const p = player.state;
-  if (p.reloading > 0 || p.ammo >= PLAYER.magazine || p.reserve <= 0) return;
-  p.reloading = PLAYER.reloadTime;
+  if (p.reloading > 0 || p.ammo >= p.magazineSize || p.reserve <= 0) return;
+  p.reloading = combat.weapon().def.reloadTime;
   hud.toast('Reloading…', 1.1);
 }
 
@@ -245,7 +314,7 @@ function onBulletHitPlayer(damage) {
 }
 
 /** A player round landed on something: sort out what, and what it costs. */
-function onBulletHit(kind, entity) {
+function onBulletHit(kind, entity, bullet) {
   audio.hit();
   if (kind === 'person') {
     if (pedestrians.fall(entity)) {
@@ -255,7 +324,7 @@ function onBulletHit(kind, entity) {
     return;
   }
   if (kind === 'actor') {
-    entity.health -= 34;
+    entity.health -= bullet?.damage ?? 34;
     entity.hurt = 0.4;
     if (entity.health <= 0 && !entity.dead) {
       entity.dead = true;
@@ -266,7 +335,7 @@ function onBulletHit(kind, entity) {
     return;
   }
   if (kind === 'car') {
-    entity.health -= 20;
+    entity.health -= Math.max(6, Math.round((bullet?.damage ?? 34) * 0.6));
     entity.hitFlash = 0.35;
     combat.spark(entity.x, entity.y, entity.angle, '#ffb46a');
   }
@@ -343,9 +412,9 @@ function handleActions(actions) {
     else if (action === 'enter') toggleVehicle();
     else if (action === 'reload') startReload();
   }
-  // Number keys hop straight to a mission (the map markers 1–6).
+  // Number keys hop straight to a mission (the map markers 1–8).
   if (screen === 'playing') {
-    for (let n = 1; n <= 6; n += 1) {
+    for (let n = 1; n <= 8; n += 1) {
       if (input.isDown(`Digit${n}`) && !missions.active) {
         missions.load({ completed: n - 1 });
         beginMission(n);
@@ -362,13 +431,22 @@ function beginPlay(fromSave) {
     missions.load({ completed: Number(save.completed) || 0 });
     player.state.money = Number(save.money) || 250;
     collectibles.load(save.stars);
+    xp = Number(save.xp) || 0;
   } else {
     missions.load({ completed: 0 });
     player.state.money = 250;
     collectibles.load([]);
+    xp = 0;
   }
+  // The weapon shelf restarts full; the story's payouts are re-earned
+  // instantly from the banked mission count.
+  combat.resetWeapons();
+  if (missions.completed >= 3) combat.unlockWeapon(1);
+  if (missions.completed >= 5) combat.unlockWeapon(2);
+  applyWeapon();
   player.spawnAt();
   police.reset();
+  airUnit.reset();
   combat.clear();
   actors.length = 0;
   screen = 'playing';
@@ -433,7 +511,7 @@ function toggleVehicle() {
 }
 
 // --------------------------------------------------------------------- HUD
-const CAR_NAMES = { sedan: 'Harbour Sedan', sport: 'Sprint Coupe', van: 'Cargo Van', cruiser: 'PD Cruiser' };
+const CAR_NAMES = { sedan: 'Harbour Sedan', sport: 'Vespera GT', van: 'Cargo Van', cruiser: 'PD Cruiser' };
 
 function carName(car) {
   if (!car) return '';
@@ -459,6 +537,7 @@ function missionDistrict(entry) {
   }
   if (entry.kind === 'steal' || entry.kind === 'escort') return 'Anchor Diner';
   if (entry.kind === 'ram') return 'Bayline Garage';
+  if (entry.kind === 'race') return 'Bayline Block';
   if (entry.kind === 'evade') return 'Citywide';
   return '';
 }
@@ -469,8 +548,19 @@ function updateHud() {
   hud.setWanted(police.wanted);
   hud.setCash(p.money);
   hud.setHealth(p.health, PLAYER.health);
-  hud.setAmmo(p.ammo, p.reserve, PLAYER.magazine);
-  hud.setSpeed(p.car ? Math.abs(p.car.speed) * 0.62 : 0, carName(p.car), Boolean(p.car));
+  hud.setAmmo(p.ammo, p.reserve, p.magazineSize);
+  if (combat.weapon().def.name !== lastWeaponName) {
+    lastWeaponName = combat.weapon().def.name;
+    hud.setWeapon(lastWeaponName);
+  }
+  hud.setWeaponSlots(combat.weaponStates());
+  // The evening clock: 18:52 at first light, one game minute a second.
+  const clockMinutes = 18 * 60 + 52 + Math.floor(time);
+  hud.setClock(`DAY 1 · ${String(Math.floor(clockMinutes / 60) % 24).padStart(2, '0')}:${String(clockMinutes % 60).padStart(2, '0')}`);
+  hud.setProgress(xpProgress());
+  const kmh = p.car ? Math.abs(p.car.speed) * 0.62 : 0;
+  const gear = !p.car ? '' : p.car.speed < -4 ? 'R' : `D${kmh < 28 ? 1 : kmh < 55 ? 2 : kmh < 90 ? 3 : kmh < 130 ? 4 : 5}`;
+  hud.setSpeed(kmh, carName(p.car), Boolean(p.car), gear);
   // Cars carry no maxHealth field; their spawn health (CAR.health) is the max.
   if (p.car) hud.setCarCondition(p.car.health, p.car.maxHealth ?? CAR.health);
   if (missions.active) {
@@ -492,9 +582,20 @@ function updateHud() {
     const nextStep = current.steps[position + 1];
     const nextMission = missions.script[missions.index + 1];
     const district = missionDistrict(stepInfo ? stepInfo.entry : null);
+    // The dossier's quiet second line: the condition the step is really
+    // about — sight, cargo, or the race itself.
+    const entry = stepInfo ? stepInfo.entry : null;
+    const inSight = police.wanted > 0 && police.cars.some((car) => Math.hypot(car.x - p.x, car.y - p.y) <= 900);
+    let sub = '';
+    if (entry?.kind === 'evade') sub = inSight ? 'They can see you — break line of sight' : 'Out of sight — stay dark and keep rolling';
+    else if (entry?.kind === 'deliver') sub = 'The bag stays in the car — so do you';
+    else if (entry?.kind === 'race') sub = 'Six checkpoints around the block. The violet coupe is already rolling';
+    else if (entry?.kind === 'guns') sub = 'Armed hands in the yard — watch the corners';
+    else if (entry?.kind === 'escort') sub = 'Whatever follows you, outrun it';
     hud.setDossier({
-      header: `${current.title} · Mission ${missions.index + 1} of ${missions.script.length}`,
+      header: `CH ${missions.index + 1} — ${current.title.toUpperCase()}`,
       objective: objectiveText,
+      sub,
       stageFilled: position,
       stageTotal: current.steps.length,
       stageIndex: position,
@@ -529,7 +630,8 @@ function updateHud() {
   // and the sight chip from those real cars, and says when to hide.
   if (pdTimer >= 0.2) {
     pdTimer = 0;
-    hud.setResponse(computePdResponse(police.cars, { x: p.x, y: p.y, heading: p.car ? p.car.angle : p.aim }, police.wanted));
+    const focus = { x: p.x, y: p.y, heading: p.car ? p.car.angle : p.aim };
+    hud.setResponse(computePdResponse(police.cars, focus, police.wanted, airUnit.active ? [airUnit.panelUnit(focus)] : []));
   }
   // The context hint: what E would do right now.
   if (screen === 'playing') {
@@ -596,6 +698,7 @@ function respawn() {
   const spot = player.respawnPoint(world);
   missions.abandon(missionCtx);
   police.reset();
+  airUnit.reset();
   combat.clear();
   player.spawnAt(spot.x, spot.y);
   player.state.health = PLAYER.respawnHealth;
@@ -660,6 +763,7 @@ function stepGame(dt) {
       audio.hit();
     },
   });
+  airUnit.update(dt, { player: p, wanted: police.wanted });
 
   combat.update(dt, {
     player: p,
@@ -678,6 +782,7 @@ function stepGame(dt) {
   // The star hunt ticks beside the story: roll over a Sunset Star, bank its cash.
   collectibles.update(p, (star, banked) => {
     player.addMoney(STARS.reward);
+    xp += 25;
     audio.cash();
     hud.toast(
       banked >= STARS.count
@@ -731,6 +836,8 @@ function render() {
   }
   for (const actor of actors) renderer.drawActor(actor);
   renderer.drawPlayer(p, time);
+  renderer.drawBarricades(police.barricades, time);
+  renderer.drawAirUnit(airUnit.unit, time);
   renderer.drawEffects(combat, traffic.skids, time);
   renderer.drawStars(collectibles.stars, time);
   renderer.endFrame(camera);
@@ -765,6 +872,30 @@ function frame(stamp) {
   }
 
   if (screen === 'playing') {
+    // The weapon wheel: Q held opens it, the pointer picks a segment,
+    // releasing Q takes the pick (or leaves the held weapon alone).
+    if (input.isDown('KeyQ')) {
+      if (!wheelShown) {
+        wheelShown = true;
+        wheelSelected = combat.currentWeaponIndex;
+        hud.showWheel(combat.weaponStates(), wheelSelected);
+      } else {
+        const dx = input.pointer.x - window.innerWidth / 2;
+        const dy = input.pointer.y - window.innerHeight / 2;
+        if (Math.hypot(dx, dy) > 34) {
+          const angle = Math.atan2(dy, dx);
+          const pick = angle < -Math.PI / 3 ? 0 : dx < 0 ? 1 : 2;
+          if (pick !== wheelSelected) {
+            wheelSelected = pick;
+            hud.showWheel(combat.weaponStates(), wheelSelected);
+          }
+        }
+      }
+    } else if (wheelShown) {
+      wheelShown = false;
+      hud.hideWheel();
+      if (wheelSelected !== combat.currentWeaponIndex) switchWeapon(wheelSelected);
+    }
     accumulator += dt;
     let guard = 0;
     while (accumulator >= STEP && guard < 5) {
@@ -824,6 +955,7 @@ function runShot(name) {
     player: player.state,
     police,
     combat,
+    airUnit,
     missions,
     collectibles,
     hud,
