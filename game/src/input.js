@@ -1,28 +1,60 @@
-// Keyboard and mouse state, sampled once per frame by the game loop.
-// `pressed` holds codes that went down this frame only; `keys` holds all
-// codes currently down. The weapon wheel reads the raw mouse position.
+// Palm Shores — input.js
+// Keyboard + mouse state, pointer lock, and a tiny edge-triggered action
+// queue (pressed-this-frame) so one keypress means one action.
 
-export const keys = new Set();
-export const pressed = new Set();
-export const mouse = { x: 0, y: 0, down: false, rightDown: false };
+export class Input {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.keys = new Set();
+    this.pressed = new Set(); // edge-triggered, cleared each frame
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.mouseDown = false;
+    this.clicked = false; // left click this frame
+    this.locked = false;
 
-let listening = false;
+    addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      this.keys.add(e.code);
+      this.pressed.add(e.code);
+      if (['Space', 'Tab'].includes(e.code)) e.preventDefault();
+    });
+    addEventListener('keyup', (e) => this.keys.delete(e.code));
+    addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; });
 
-export function initInput(windowObj) {
-  if (listening) return; listening = true;
-  windowObj.addEventListener('keydown', (e) => {
-    if (!keys.has(e.code)) pressed.add(e.code);
-    keys.add(e.code);
-    if (['ArrowUp', 'ArrowDown', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
-  });
-  windowObj.addEventListener('keyup', (e) => keys.delete(e.code));
-  windowObj.addEventListener('blur', () => { keys.clear(); mouse.down = false; mouse.rightDown = false; });
-  windowObj.addEventListener('mousemove', (e) => { mouse.x = e.clientX; mouse.y = e.clientY; });
-  windowObj.addEventListener('mousedown', (e) => { if (e.button === 0) mouse.down = true; if (e.button === 2) mouse.rightDown = true; });
-  windowObj.addEventListener('mouseup', (e) => { if (e.button === 0) mouse.down = false; if (e.button === 2) mouse.rightDown = false; });
-  windowObj.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) { this.mouseDown = true; this.clicked = true; }
+    });
+    addEventListener('mouseup', (e) => { if (e.button === 0) this.mouseDown = false; });
+    document.addEventListener('pointerlockchange', () => {
+      this.locked = document.pointerLockElement === canvas;
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (this.locked) { this.mouseDX += e.movementX; this.mouseDY += e.movementY; }
+    });
+  }
+
+  down(code) { return this.keys.has(code); }
+  wasPressed(code) { return this.pressed.has(code); }
+
+  // WASD / arrows as a -1..1 pair.
+  moveAxes() {
+    const x = (this.down('KeyD') || this.down('ArrowRight') ? 1 : 0)
+            - (this.down('KeyA') || this.down('ArrowLeft') ? 1 : 0);
+    const y = (this.down('KeyW') || this.down('ArrowUp') ? 1 : 0)
+            - (this.down('KeyS') || this.down('ArrowDown') ? 1 : 0);
+    return { x, y };
+  }
+
+  lockPointer() {
+    if (!this.locked) this.canvas.requestPointerLock?.();
+  }
+  unlockPointer() { document.exitPointerLock?.(); }
+
+  endFrame() {
+    this.pressed.clear();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.clicked = false;
+  }
 }
-
-export function endFrameInput() { pressed.clear(); }
-export function wasPressed(code) { return pressed.has(code); }
-export function isDown(code) { return keys.has(code); }

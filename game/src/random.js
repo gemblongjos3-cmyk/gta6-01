@@ -1,25 +1,37 @@
-// Deterministic seeded randomness: the city, traffic and staged screenshot
-// scenes all draw from one seed so a render can be reproduced exactly.
+// Palm Shores — random.js
+// Deterministic seeded random numbers (mulberry32) so a screenshot seed
+// always rebuilds the same city, and small helpers shared by every module.
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
+  return function next() {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-export function rngRange(rng, lo, hi) { return lo + rng() * (hi - lo); }
-export function rngInt(rng, lo, hi) { return Math.floor(lo + rng() * (hi - lo + 1)); }
-export function rngPick(rng, arr) { return arr[Math.floor(rng() * arr.length) % arr.length]; }
-export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
-export function lerp(a, b, t) { return a + (b - a) * t; }
-export function dist2d(ax, az, bx, bz) { return Math.hypot(ax - bx, az - bz); }
-export function angleLerp(a, b, t) {
-  let d = (b - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
+export function makeRng(seed) {
+  const next = mulberry32(seed);
+  return {
+    next,
+    range(min, max) { return min + next() * (max - min); },
+    int(min, max) { return Math.floor(min + next() * (max - min + 1)); },
+    pick(arr) { return arr[Math.floor(next() * arr.length)]; },
+    chance(p) { return next() < p; },
+    // Deterministic pick that does not advance the stream differently
+    // depending on call order elsewhere: hash a string to a 0..1 value.
+    hash01(str) {
+      let h = 2166136261;
+      for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+      return ((h >>> 0) % 10000) / 10000;
+    },
+  };
+}
+
+// Parse ?seed= from the URL; default seed keeps the shipped city stable.
+export function seedFromUrl() {
+  const n = Number(new URLSearchParams(location.search).get('seed'));
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 20261120;
 }

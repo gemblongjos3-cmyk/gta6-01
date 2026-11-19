@@ -1,67 +1,80 @@
-// Palm Shores — central tuning and story data for the 3D build.
-// Every name in this file is original to Palm Shores: its city, crew, cars,
-// weapons, stations and missions were written for this game alone.
+// Palm Shores — config.js
+// Single source of truth for world layout, tuning and naming.
+// The city is a 5x5 block grid on a rain-slick coast; the docks and the
+// water sit along the south edge. Nothing here is copied from any
+// commercial game: district names, characters and tuning are my own.
 
-export const CITY = {
-  block: 44,            // city block size in metres
-  road: 14,             // standard road width
-  avenue: 20,           // Sunset Avenue width (the wide east-west strip)
-  pitch: 58,            // block + road pitch
-  grid: 3,              // blocks from centre to edge on each axis (7 x 7)
-  waterX: 252,          // the bay starts east of here
-  dayStart: 18 * 60 + 52, // the story opens at 18:52, DAY 1
+export const GAME_TITLE = 'Palm Shores';
+export const SAVE_KEY = 'palm-shores-save-v1';
+
+export const WORLD = {
+  // Road centre lines (x and z), 5 roads each way, 46 units apart.
+  roads: [-92, -46, 0, 46, 92],
+  roadWidth: 12,
+  blockSize: 34,
+  // South edge: docks begin here, water beyond.
+  docksZ: 118,
+  waterZ: 150,
+  bounds: 130,
 };
 
 export const DISTRICTS = [
-  { name: 'DOWNTOWN', x: 0, z: 0 },
-  { name: 'SUNSET AVENUE', x: -80, z: 0 },
-  { name: 'CORAL STRAND', x: 190, z: -40 },
-  { name: 'PIER NINE', x: 205, z: 150 },
-  { name: 'BAYLINE', x: -150, z: 150 },
-  { name: 'ISLA VERDE', x: -60, z: -160 },
-  { name: 'PALM HEIGHTS', x: -170, z: -90 },
+  { name: 'Vesper Row',      cx: -69, cz: -69, color: '#ff2e88' }, // neon bar strip
+  { name: 'Marina District', cx:  69, cz: -69, color: '#22d3ee' }, // towers, hotels
+  { name: 'Coral Heights',   cx: -69, cz:  69, color: '#f59e0b' }, // apartments
+  { name: 'The Docks',       cx:  69, cz:  69, color: '#a3e635' }, // containers, cranes
+  { name: 'Palm Court',      cx:   0, cz:   0, color: '#c084fc' }, // downtown core
 ];
 
-export const HERO_CAR = { model: 'VESPERA GT', color: 0xff77b7 };
+export const NIGHT = {
+  sky: 0x0b0620,        // deep violet night
+  fog: 0x140a2e,
+  fogNear: 60,
+  fogFar: 260,
+  ambient: 0x33406e,
+  moon: 0xbfd0ff,
+  ground: 0x0d0d14,
+};
 
-export const WEAPONS = [
-  { id: 'kestrel', name: 'KESTREL 9', kind: 'PISTOL', damage: 34, rate: 260, spread: 0.03, pellets: 1, magazine: 12, reserve: Infinity, unlockMission: 0 },
-  { id: 'wasp', name: 'WASP 6149', kind: 'SMG', damage: 16, rate: 85, spread: 0.09, pellets: 1, magazine: 30, reserve: 240, unlockMission: 3 },
-  { id: 'marlin', name: 'MARLIN 12', kind: 'SCATTERGUN', damage: 11, rate: 800, spread: 0.22, pellets: 6, magazine: 6, reserve: 48, unlockMission: 5 },
-];
+export const PLAYER_TUNING = {
+  walkSpeed: 6,
+  runSpeed: 11,
+  health: 100,
+  armor: 50,
+  pistolAmmo: 48,
+  pistolDamage: 34,
+  pistolRange: 90,
+  pistolRate: 0.22, // seconds between shots
+};
 
-export const RADIO = [
-  { freq: 'WAVE 88.1', name: 'NEON DRIVE', mood: 'synthwave', tracks: [
-    ['Pink Horizon', 'Lumen Kids'], ['Chrome Palms', 'Vespera Club'], ['Salt in the Wiring', 'DJ Marisol'],
-    ['Ultraviolet Mile', 'The Long Goodnights'], ['Glass Freeway', 'Ana Profundo'] ] },
-  { freq: 'PALM 98.7', name: 'SALTLINE', mood: 'chill', tracks: [
-    ['Low Tide Confessions', 'Marina Sol'], ['Bougainvillea', 'The Strand Quartet'], ['Ice in the Glass', 'Rene Azul'] ] },
-  { freq: 'FLAMINGO FM', name: '104.5 THE FLAMINGO', mood: 'dance', tracks: [
-    ['Neon Flamingo', 'Kiko Verde'], ['Baila en la Arena', 'Las Sirenas'], ['Pink Static', 'DJ Marisol'] ] },
-  { freq: 'RADIO MIRAMAR', name: '101.3', mood: 'latin', tracks: [
-    ['Muelle Nueve', 'Orquesta Brisa'], ['Corazon de Neon', 'Lucia Ferrer'], ['La Ultima Ola', 'Trio Palmas'] ] },
-];
+export const VEHICLE_TYPES = {
+  hatch:  { label: 'Palm Hatch',   top: 26, accel: 14, turn: 2.4, brake: 22, color: 0xffb020, mass: 1.0 },
+  sedan:  { label: 'Vesper Sedan', top: 30, accel: 16, turn: 2.2, brake: 24, color: 0x2e86ff, mass: 1.1 },
+  coupe:  { label: 'Shores GT',    top: 38, accel: 22, turn: 2.7, brake: 28, color: 0xff2e88, mass: 0.95 },
+  pickup: { label: 'Dune Pickup',  top: 28, accel: 15, turn: 2.0, brake: 22, color: 0x8a5a2b, mass: 1.4 },
+  van:    { label: 'Cargo Van',    top: 24, accel: 11, turn: 1.7, brake: 20, color: 0xe8e8e8, mass: 1.6 },
+  cruiser:{ label: 'Shores PD',    top: 34, accel: 20, turn: 2.5, brake: 26, color: 0x111827, mass: 1.2 },
+};
 
-export const TRAFFIC_MODELS = [
-  { model: 'SOLMARINA', kind: 'sedan' }, { model: 'BRISA COMPACT', kind: 'hatch' },
-  { model: 'CAYO PICKUP', kind: 'pickup' }, { model: 'VELMARA COUPE', kind: 'coupe' },
-  { model: 'ISLA VAN', kind: 'van' }, { model: 'TARPON TAXI', kind: 'taxi' },
-];
+export const WANTED = {
+  decayPerSec: 0.55,      // heat lost while unseen
+  decayDelay: 6,          // seconds after last crime before decay starts
+  heatPerStar: 25,
+  maxStars: 5,
+  crimeHeat: { theft: 18, collision: 6, shot: 10, pedestrian: 22, policeHit: 30 },
+  // cruisers on the street per star level (index = stars)
+  cruisersPerStar: [0, 1, 2, 2, 3, 4],
+  heliAtStars: 4,
+};
 
-export const TRAFFIC_COLORS = [0xf2e8d5, 0x7fd4c1, 0xff8c42, 0x5b8def, 0xd94f70, 0x8d6fd1, 0x3fbf8f, 0xe8c547, 0xb8c4ce, 0x243447];
+export const ECONOMY = {
+  startCash: 120,
+  pickupCash: [25, 40, 60, 100],
+  collectibleCount: 20,
+  collectibleBonus: 150,
+};
 
-export const UPGRADES = [
-  { id: 'engine', name: 'STREET TUNE — ENGINE', cost: 900, blurb: 'Top speed and pull, courtesy of Bayline Garage.' },
-  { id: 'nitro', name: 'NITRO KIT', cost: 1400, blurb: 'Hold SHIFT for a violet burst. Recharges as you drive.' },
-  { id: 'armor', name: 'REINFORCED PANELS', cost: 1100, blurb: 'The Vespera shrugs off half the damage of every hit.' },
-];
+export const MISSION_REWARDS = [250, 400, 500, 800, 1500];
 
-// Luna Marchetti runs dispatch for the crew from a rooftop over Bayline.
-// She is the voice in the bottom-centre dialogue box for the whole story.
-export const LUNA = 'LUNA — DISPATCH';
-
-export const STORY_INTRO = [
-  'You are MARA VOSS, the fastest wheel in Palm Shores.',
-  'Eight jobs stand between you and owning the Bayline Garage.',
-  'Luna runs dispatch. The Shores PD runs everything else.',
-];
+// Dispatcher character: "Rook", a fixer who talks to the player on the radio.
+export const DISPATCHER = 'ROOK';

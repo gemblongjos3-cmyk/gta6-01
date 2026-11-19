@@ -1,58 +1,130 @@
-// Pedestrians: evening crowds walking the block perimeters of Palm Shores.
-// They stroll, they chat in pairs, and they scatter when a car comes at them
-// too fast or a shot cracks out — the city has to feel inhabited to steal.
+// Palm Shores — pedestrians.js
+// People on the sidewalks: they stroll between corners, chat in pairs,
+// and sprint away from gunfire, speeding cars and police chases.
 
 import * as THREE from 'three';
-import { rngPick, rngRange, dist2d } from './random.js';
+import { WORLD } from './config.js';
 
-const COATS = [0xff8c42, 0x7fd4c1, 0xf6c6d8, 0x5b8def, 0xe8c547, 0xf2f0ea, 0x3fbf8f, 0xd94f70];
+const SHIRT_COLORS = [0xff6b6b, 0x4ecdc4, 0xffe66d, 0xc084fc, 0x94a3b8, 0xf97316, 0x38bdf8, 0xf472b6];
 
-export function createPedestrians(scene, world, rng, count = 16) {
-  const peds = [];
-  for (let i = 0; i < count; i++) {
-    const g = new THREE.Group();
-    const coat = new THREE.MeshStandardMaterial({ color: rngPick(rng, COATS), roughness: 0.85 });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.6, 0.22), coat); torso.position.y = 1.1; torso.castShadow = true; g.add(torso);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.24), new THREE.MeshStandardMaterial({ color: rngPick(rng, [0xf2b183, 0xc98a5e, 0x8a5a34, 0x6e4530]) })); head.position.y = 1.58; g.add(head);
-    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.78, 0.19), new THREE.MeshStandardMaterial({ color: 0x2a2733 })); legs.position.y = 0.4; g.add(legs);
-    scene.add(g);
-    const rect = world.blockRects[i % world.blockRects.length];
-    const ped = {
-      mesh: g, rect, edge: i % 4, u: rng(), speed: rngRange(rng, 1.1, 1.7),
-      fleeT: 0, fleeDir: 0, phase: rng() * 9,
-    };
-    peds.push(ped);
+function makePerson(rng) {
+  const g = new THREE.Group();
+  const shirt = new THREE.MeshStandardMaterial({ color: rng.pick(SHIRT_COLORS), roughness: 0.9 });
+  const skin = new THREE.MeshStandardMaterial({ color: [0xf1c27d, 0xe0ac69, 0x8d5524, 0xffdbac][rng.int(0, 3)], roughness: 0.8 });
+  const legs = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.9 });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.75, 0.3), shirt);
+  body.position.y = 1.05;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 10, 10), skin);
+  head.position.y = 1.62;
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.65, 0.2), legs);
+  legL.position.set(-0.13, 0.33, 0);
+  const legR = legL.clone();
+  legR.position.x = 0.13;
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 0.14), shirt);
+  armL.position.set(-0.32, 1.05, 0);
+  const armR = armL.clone();
+  armR.position.x = 0.32;
+  g.add(body, head, legL, legR, armL, armR);
+  g.userData.ped = { legL, legR, armL, armR, walkPhase: rng.range(0, 6) };
+  return g;
+}
+
+export class Pedestrians {
+  constructor(scene, city, rng) {
+    this.scene = scene;
+    this.city = city;
+    this.rng = rng;
+    this.peds = [];
+    this._spawn(26);
   }
-  function rectPoint(rect, edge, u) {
-    const hw = rect.w / 2 - 1.2, hd = rect.d / 2 - 1.2;
-    if (edge === 0) return { x: rect.x - hw + u * hw * 2, z: rect.z - hd };
-    if (edge === 1) return { x: rect.x + hw, z: rect.z - hd + u * hd * 2 };
-    if (edge === 2) return { x: rect.x + hw - u * hw * 2, z: rect.z + hd };
-    return { x: rect.x - hw, z: rect.z + hd - u * hd * 2 };
+
+  _spawn(n) {
+    for (let i = 0; i < n; i++) {
+      const g = makePerson(this.rng);
+      const road = this.rng.pick(WORLD.roads);
+      const along = this.rng.range(-110, 110);
+      const side = this.rng.chance(0.5) ? 1 : -1;
+      if (this.rng.chance(0.5)) g.position.set(road + side * 8.4, 0, along);
+      else g.position.set(along, 0, road + side * 8.4);
+      g.rotation.y = this.rng.range(0, Math.PI * 2);
+      this.scene.add(g);
+      this.peds.push({
+        group: g,
+        speed: this.rng.range(1.2, 2.2),
+        target: this._newTarget(g.position),
+        fleeing: 0,
+        dead: false,
+      });
+    }
   }
-  return {
-    peds,
-    update(dt, t, threats) {
-      for (const ped of peds) {
-        const p = ped.mesh.position;
-        // scatter from fast cars and gunfire
-        if (ped.fleeT <= 0) for (const th of threats) {
-          if (dist2d(p.x, p.z, th.x, th.z) < th.r) { ped.fleeT = 1.6; ped.fleeDir = Math.atan2(p.x - th.x, p.z - th.z); break; }
-        }
-        if (ped.fleeT > 0) {
-          ped.fleeT -= dt;
-          p.x += Math.sin(ped.fleeDir) * dt * 5.4; p.z += Math.cos(ped.fleeDir) * dt * 5.4;
-          ped.mesh.rotation.y = ped.fleeDir;
-        } else {
-          ped.u += (ped.speed * dt) / (ped.rect.w + ped.rect.d);
-          if (ped.u >= 1) { ped.u = 0; ped.edge = (ped.edge + 1) % 4; }
-          const pt = rectPoint(ped.rect, ped.edge, ped.u);
-          const heading = Math.atan2(pt.x - p.x, pt.z - p.z);
-          p.x = pt.x; p.z = pt.z;
-          if (Math.abs(pt.x) > 0.01) ped.mesh.rotation.y = heading;
-        }
-        ped.mesh.position.y = Math.abs(Math.sin(t * 6.4 + ped.phase)) * 0.045;
+
+  _newTarget(pos) {
+    const road = this.rng.pick(WORLD.roads);
+    const along = this.rng.range(-110, 110);
+    const side = this.rng.chance(0.5) ? 1 : -1;
+    if (this.rng.chance(0.5)) return new THREE.Vector3(road + side * 8.4, 0, along);
+    return new THREE.Vector3(along, 0, road + side * 8.4);
+  }
+
+  // Danger at (x,z): everyone nearby starts running away.
+  scare(x, z, radius = 18) {
+    for (const p of this.peds) {
+      if (p.dead) continue;
+      const d = Math.hypot(p.group.position.x - x, p.group.position.z - z);
+      if (d < radius) {
+        p.fleeing = 3 + (radius - d) * 0.1;
+        const away = new THREE.Vector3(p.group.position.x - x, 0, p.group.position.z - z).normalize();
+        p.target = p.group.position.clone().add(away.multiplyScalar(30));
       }
-    },
-  };
+    }
+  }
+
+  update(dt) {
+    for (const p of this.peds) {
+      if (p.dead) continue;
+      const g = p.group;
+      const to = new THREE.Vector3().subVectors(p.target, g.position);
+      to.y = 0;
+      const dist = to.length();
+      if (dist < 1.5) { p.target = this._newTarget(g.position); continue; }
+      const speed = p.fleeing > 0 ? p.speed * 3.2 : p.speed;
+      p.fleeing = Math.max(0, p.fleeing - dt);
+      to.normalize();
+      g.position.addScaledVector(to, speed * dt);
+      const targetYaw = Math.atan2(to.x, to.z);
+      let dy = targetYaw - g.rotation.y;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      g.rotation.y += dy * Math.min(1, 8 * dt);
+      // Keep them on the sidewalk strip: steer back if they drift onto a road.
+      const pd = g.userData.ped;
+      pd.walkPhase += dt * speed * 4;
+      const swing = Math.sin(pd.walkPhase) * 0.5;
+      pd.legL.rotation.x = swing;
+      pd.legR.rotation.x = -swing;
+      pd.armL.rotation.x = -swing * 0.7;
+      pd.armR.rotation.x = swing * 0.7;
+      // Clamp inside the city.
+      g.position.x = THREE.MathUtils.clamp(g.position.x, -120, 120);
+      g.position.z = THREE.MathUtils.clamp(g.position.z, -120, 128);
+    }
+  }
+
+  // Nearest living pedestrian within radius — used by combat hit tests.
+  nearest(pos, radius = 3) {
+    let best = null, bd = radius;
+    for (const p of this.peds) {
+      if (p.dead) continue;
+      const d = Math.hypot(p.group.position.x - pos.x, p.group.position.z - pos.z);
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  }
+
+  kill(ped) {
+    ped.dead = true;
+    ped.group.rotation.x = -Math.PI / 2; // fall flat
+    ped.group.position.y = 0.3;
+  }
 }

@@ -1,197 +1,276 @@
-// The story of Palm Shores: eight jobs for Mara Voss, dispatched by Luna.
-// A small stage engine drives them — go somewhere, pick something up, lose
-// the police, deliver the car, clear the docks, tail a courier, and finally
-// the Paper Moon run and the Star Run race that end the story.
+// Palm Shores — missions.js
+// The story chain: five missions from Rook, the fixer on the radio.
+// Pickup, hot-wheels theft, a police escape, a docks shootout, and a
+// neon finale. Each mission owns its objective, marker, timer and reward.
 
 import * as THREE from 'three';
-import { dist2d, clamp } from './random.js';
+import { MISSION_REWARDS, DISPATCHER } from './config.js';
+import { Guard } from './combat.js';
 
-export const MISSIONS = [
-  { title: 'Salt & Static', reward: { cash: 300, xp: 150 }, intro: 'Warm-up, Mara. Your Vespera is parked on the Strand. Take a package to the Hotel Solana — gently, it is glass.',
-    stages: [
-      { type: 'goto', x: 176, z: -6, label: 'Get to your Vespera GT on Coral Strand', needCar: false },
-      { type: 'timedeliver', x: -70, z: 33, seconds: 150, label: 'Deliver the package to the Hotel Solana' },
-    ] },
-  { title: 'Borrowed Time', reward: { cash: 450, xp: 150 }, intro: 'A debtor in Palm Heights owes us a coupe. Take it — he will call the PD, so bring it home quick.',
-    stages: [
-      { type: 'goto', x: -174, z: -110, label: 'Take the coupe in Palm Heights', needCar: false, heat: 120 },
-      { type: 'timedeliver', x: -150, z: 138, seconds: 170, label: 'Bring the coupe home to Bayline Garage' },
-    ] },
-  { title: 'Tail Lights', reward: { cash: 550, xp: 150 }, intro: 'A courier for the Velmara crew runs the avenue at dusk. Tail him — close enough to learn, far enough to live.',
-    stages: [
-      { type: 'chase', label: 'Tail the Velmara courier — stay on him', seconds: 5 },
-      { type: 'goto', x: -58, z: -168, label: 'Follow him in to Isla Verde and mark the drop', needCar: true },
-    ] },
-  { title: 'Pier Nine', reward: { cash: 700, xp: 150 }, intro: 'The Velmara crew holds our ledger at Pier Nine. Three of them, armed. Take it back and bring me the book.',
-    stages: [
-      { type: 'clear', x: 285, z: 150, count: 3, label: 'Clear the Velmara crew off Pier Nine' },
-      { type: 'goto', x: 322, z: 150, label: 'Pick up the ledger at the end of the pier', needCar: false },
-    ] },
-  { title: 'Heat Line', reward: { cash: 850, xp: 150 }, intro: 'A Tarpon Taxi downtown is carrying more than passengers. Lift it, lose the heat, park it at Bayline.',
-    stages: [
-      { type: 'goto', x: 58, z: 64, label: 'Lift the Tarpon Taxi downtown', needCar: false, heat: 210 },
-      { type: 'evade', seconds: 20, label: 'Lose the Shores PD' },
-      { type: 'deliver', x: -150, z: 138, label: 'Park it at Bayline Garage' },
-    ] },
-  { title: 'The Long Goodnight', reward: { cash: 1000, xp: 150 }, intro: 'The crew is throwing a goodbye party at a Strand villa. Crash it. Their driver will run — do not let him reach the bridge.',
-    stages: [
-      { type: 'clear', x: 205, z: -116, count: 4, label: 'Crash the villa party on Coral Strand' },
-      { type: 'chase', label: 'Stop the fleeing driver', seconds: 4 },
-    ] },
-  { title: 'Paper Moon', reward: { cash: 1600, xp: 200 }, intro: 'Tonight we take the Pier Nine payroll. The scanners sweep in waves — when the alarms sing, you run, and you do not stop until Bayline.',
-    stages: [
-      { type: 'goto', x: 268, z: 138, label: 'Take the payroll at the Pier Nine warehouse', needCar: false, heat: 400 },
-      { type: 'evade', seconds: 75, lock: 4, label: "Lose the cops before Luna's scanner window closes" },
-      { type: 'deliver', x: -150, z: 138, label: 'Bring the money home' },
-    ] },
-  { title: 'Star Run', reward: { cash: 2200, xp: 250 }, intro: 'Last job, Mara. Six checkpoints, one rival, the whole city watching. Win the Star Run and the garage is ours.',
-    stages: [
-      { type: 'race', label: 'Win the Star Run — 6 checkpoints against the rival', checkpoints: [[58, 0], [116, -58], [58, -116], [-58, -58], [-116, 0], [-150, 138]] },
-    ] },
+const V3 = (x, z) => new THREE.Vector3(x, 0, z);
+
+const DEFS = [
+  {
+    id: 'pickup',
+    title: 'First Pickup',
+    briefing: 'New in town? Good. A package is waiting at the Vesper bar on Vesper Row. Pick it up, bring it to the docks warehouse. No questions, no cops.',
+    reward: MISSION_REWARDS[0],
+  },
+  {
+    id: 'hotwheels',
+    title: 'Hot Wheels',
+    briefing: 'A client wants a Shores GT, pink, no questions. One is parked near you — marked on the map. Steal it and bring it to the Marina garage. You have two and a half minutes.',
+    reward: MISSION_REWARDS[1],
+  },
+  {
+    id: 'tailshake',
+    title: 'Tail Shake',
+    briefing: 'You tripped a silent alarm. Cops are coming. Lose them and get to the hideout in Palm Court. Do not let them box you in.',
+    reward: MISSION_REWARDS[2],
+  },
+  {
+    id: 'docks',
+    title: 'Docks Shootout',
+    briefing: 'The crate at Pier 3 is ours, but the dock crew is armed and they know it. Clear them out, then grab the crate. Watch your health.',
+    reward: MISSION_REWARDS[3],
+  },
+  {
+    id: 'finale',
+    title: 'Neon Run',
+    briefing: 'Last job. Run the package through three checkpoints to the helipad at the docks. The whole city will be watching — so will the air unit. Make it count.',
+    reward: MISSION_REWARDS[4],
+  },
 ];
 
-export function createMissions(scene, ctx) {
-  // the gold beacon: a shaft of light you drive into
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 30, 18, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xffc92e, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
-  beam.visible = false; scene.add(beam);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.7, 2.2, 28),
-    new THREE.MeshBasicMaterial({ color: 0xffc92e, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
-  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.07; ring.visible = false; scene.add(ring);
+export class Missions {
+  constructor(scene, rng) {
+    this.scene = scene;
+    this.rng = rng;
+    this.index = 0;          // current mission, 0..4; 5 = story done
+    this.stage = 0;
+    this.timer = 0;
+    this.target = null;      // Vector3 or null
+    this.targetRadius = 6;
+    this.objective = '';
+    this.active = false;
+    this.guards = [];
+    this.markedCar = null;
+    this.checkpoint = 0;
+    this.storyDone = false;
+    // Events wired by main.js.
+    this.events = {
+      briefing: () => {}, objective: () => {}, reward: () => {},
+      fail: () => {}, storyDone: () => {}, toast: () => {},
+    };
+    this.marker = this._makeMarker();
+    this.marker.visible = false;
+    scene.add(this.marker);
+  }
 
-  const director = {
-    index: ctx.save.missionsDone.length, // next mission to run
-    active: null, stageIdx: 0, stageT: 0, unseenT: 0, tailT: 0,
-    rival: null, rivalCp: 0, playerCp: 0,
-    get current() { return this.active ? MISSIONS[this.active] : null; },
-    get stage() { return this.current ? this.current.stages[this.stageIdx] : null; },
-    available() { return !this.active && this.index < MISSIONS.length; },
+  _makeMarker() {
+    const g = new THREE.Group();
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.2, 2.2, 30, 16, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xffd166, transparent: true, opacity: 0.18,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      }),
+    );
+    beam.position.y = 15;
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(2.4, 0.18, 8, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd166 }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.4;
+    g.add(beam, ring);
+    g.userData.ring = ring;
+    return g;
+  }
 
-    start(idx) {
-      this.active = idx; this.stageIdx = 0; this.stageT = 0; this.unseenT = 0; this.tailT = 0;
-      const m = this.current;
-      ctx.say(m.intro, 'NEW JOB — CH ' + (idx + 1));
-      this.beginStage();
-      ctx.onMissionStart?.(m, idx);
-    },
-    beginStage() {
-      const s = this.stage; this.stageT = 0; this.unseenT = 0;
-      if (!s) return;
-      if (s.heat) ctx.pd.raise(s.heat);
-      if (s.lock) ctx.pd.lockFloor = s.lock;
-      if (s.type === 'clear') ctx.spawnHostiles(s);
-      if (s.type === 'chase') ctx.spawnChaseCar(s);
-      if (s.type === 'race') { this.rivalCp = 0; this.playerCp = 0; ctx.spawnRival(s); }
-      ctx.onStageStart?.(s, this.stageIdx, this.current.stages.length);
-    },
-    setMarker(x, z, show = true) {
-      beam.visible = show; ring.visible = show;
-      beam.position.set(x, 15, z); ring.position.set(x, 0.07, z);
-    },
-    completeStage() {
-      const m = this.current;
-      this.stageIdx++;
-      ctx.pd.lockFloor = 0;
-      if (this.stageIdx >= m.stages.length) this.completeMission();
-      else { ctx.say(stageLine(this.stage), ''); this.beginStage(); }
-    },
-    completeMission() {
-      const m = this.current, idx = this.active;
-      this.active = null; this.index = idx + 1;
-      ctx.giveReward(m.reward.cash, m.reward.xp, m.title);
-      if (idx + 1 === 3) ctx.say('The WASP 6149 is yours now, Mara. Bayline keeps it oiled.', 'WEAPON UNLOCKED');
-      else if (idx + 1 === 5) ctx.say('MARLIN 12 unlocked. Try not to redecorate the whole pier.', 'WEAPON UNLOCKED');
-      else if (idx + 1 === 8) ctx.say('The garage is ours. Eight jobs, one legend. Palm Shores is yours now, Mara.', 'STORY COMPLETE');
-      else ctx.say('Job done. The street noticed — respect travels fast here.', 'JOB COMPLETE');
-      ctx.onMissionComplete?.(m, idx);
-    },
-    fail(reason) {
-      if (!this.active && this.active !== 0) return;
-      const idx = this.active;
-      this.active = null; ctx.pd.lockFloor = 0;
-      ctx.clearHostiles(); ctx.clearChase();
-      ctx.say(reason + ' The job resets at the Bayline beacon.', 'JOB FAILED');
-      ctx.onMissionFail?.(idx);
-    },
-    update(dt) {
-      const s = this.stage;
-      if (!s) { this.setMarker(-150, 138, this.available()); return; }
-      const p = ctx.focusPos();
-      this.stageT += dt;
-      const arrive = (x, z, r = 4.2) => dist2d(p.x, p.z, x, z) < r;
-      switch (s.type) {
-        case 'goto': case 'pickup':
-          this.setMarker(s.x, s.z);
-          if (arrive(s.x, s.z) && (!s.needCar || ctx.inCar())) this.completeStage();
-          break;
-        case 'deliver':
-          this.setMarker(s.x, s.z);
-          if (arrive(s.x, s.z, 5) && ctx.inCar()) this.completeStage();
-          break;
-        case 'timedeliver':
-          this.setMarker(s.x, s.z);
-          if (arrive(s.x, s.z, 5) && ctx.inCar()) this.completeStage();
-          else if (this.stageT > s.seconds) { ctx.say('Too slow — the buyer walked. Run it again.', ''); this.stageT = 0; }
-          break;
-        case 'evade': {
-          this.setMarker(0, 0, false);
-          if (this.stageT >= 12 && !ctx.pd.sighted) this.unseenT += dt; else this.unseenT = 0;
-          if (this.unseenT >= 4 || (this.stageT > s.seconds && ctx.pd.stars <= ctx.pd.lockFloor && !ctx.pd.sighted)) this.completeStage();
-          else if (this.stageT > s.seconds + 45) { ctx.say('The window closed. Shake them and the job continues.', ''); this.stageT = 30; }
-          break;
+  _setTarget(x, z, radius, objective) {
+    this.target = V3(x, z);
+    this.targetRadius = radius;
+    this.objective = objective;
+    this.marker.position.set(x, 0, z);
+    this.marker.visible = true;
+    this.events.objective(objective);
+  }
+
+  _clearTarget() {
+    this.target = null;
+    this.marker.visible = false;
+  }
+
+  get current() { return DEFS[this.index] || null; }
+  get done() { return this.index >= DEFS.length; }
+
+  start(index = 0) {
+    this.index = index;
+    this.stage = 0;
+    this.checkpoint = 0;
+    this.active = true;
+    this.storyDone = false;
+    const def = this.current;
+    if (!def) { this.active = false; return; }
+    this.events.briefing(`${DISPATCHER}: ${def.briefing}`);
+    this._enterStage(0);
+  }
+
+  _enterStage(stage, ctx) {
+    this.stage = stage;
+    const id = this.current?.id;
+    if (id === 'pickup') {
+      if (stage === 0) this._setTarget(-62, -62, 6, 'Pick up the package at the Vesper bar');
+      else this._setTarget(58, 124, 7, 'Deliver the package to the docks warehouse');
+    } else if (id === 'hotwheels') {
+      this.timer = 150;
+      const car = ctx.spawnMarkedCar('coupe', ctx.pos.x + 14, ctx.pos.z + 8);
+      this.markedCar = car;
+      this._setTarget(car.position.x, car.position.z, 6, 'Steal the pink Shores GT');
+    } else if (id === 'tailshake') {
+      ctx.police.addHeat(75, 'alarm', ctx.now);
+      this.timer = 120;
+      this._setTarget(-23, 23, 7, 'Reach the Palm Court hideout — lose the cops');
+    } else if (id === 'docks') {
+      this._setTarget(20, 126, 8, 'Reach Pier 3 at the docks');
+    } else if (id === 'finale') {
+      ctx.police.addHeat(100, 'finale', ctx.now);
+      this.timer = 200;
+      this.checkpoint = 0;
+      this._setTarget(0, 0, 7, 'Checkpoint 1/3: Palm Court');
+    }
+  }
+
+  _complete(ctx) {
+    const def = this.current;
+    ctx.addCash(def.reward);
+    this.events.reward(`Mission complete: ${def.title} — +$${def.reward}`);
+    this._clearTarget();
+    this.index += 1;
+    if (this.done) {
+      this.active = false;
+      this.storyDone = true;
+      this.events.storyDone();
+      this.events.objective('Story complete — free roam. Collect the palm coins!');
+    } else {
+      const next = this.current;
+      this.events.briefing(`${DISPATCHER}: ${next.briefing}`);
+      this._enterStage(0, ctx);
+    }
+  }
+
+  _fail(ctx, reason) {
+    this.events.fail(reason);
+    // Retry the same mission from its first stage.
+    this._clearTarget();
+    this._clearGuards();
+    this._enterStage(0, ctx);
+  }
+
+  _clearGuards() {
+    for (const g of this.guards) g.remove();
+    this.guards = [];
+  }
+
+  _atTarget(ctx) {
+    if (!this.target) return false;
+    return Math.hypot(ctx.pos.x - this.target.x, ctx.pos.z - this.target.z) < this.targetRadius;
+  }
+
+  update(dt, ctx) {
+    if (!this.active || this.done) return;
+    // Marker pulse.
+    if (this.marker.visible) {
+      this.marker.userData.ring.rotation.z += dt * 1.5;
+      const s = 1 + Math.sin(ctx.now * 3) * 0.12;
+      this.marker.userData.ring.scale.set(s, s, 1);
+    }
+    // Timers.
+    if (this.timer > 0) {
+      this.timer -= dt;
+      if (this.timer <= 0) {
+        this._fail(ctx, 'Out of time — Rook is not happy. Try again.');
+        return;
+      }
+    }
+    const id = this.current.id;
+
+    if (id === 'pickup') {
+      if (this.stage === 0 && this._atTarget(ctx)) {
+        this.events.toast('Package secured. Now get it to the docks.');
+        this._enterStage(1, ctx);
+      } else if (this.stage === 1 && this._atTarget(ctx)) {
+        this._complete(ctx);
+      }
+    } else if (id === 'hotwheels') {
+      if (this.stage === 0) {
+        if (this.markedCar && ctx.driving && ctx.car === this.markedCar) {
+          this.stage = 1;
+          this._setTarget(69, -60, 7, 'Deliver the Shores GT to the Marina garage');
+          this.events.toast('That is the one. Drive it to the garage — fast.');
+        } else if (this.markedCar) {
+          // Keep the marker glued to the car.
+          this.marker.position.set(this.markedCar.position.x, 0, this.markedCar.position.z);
+          this.target.set(this.markedCar.position.x, 0, this.markedCar.position.z);
         }
-        case 'clear': {
-          this.setMarker(s.x, s.z);
-          if (ctx.hostilesAlive() === 0 && this.stageT > 1) this.completeStage();
-          break;
+      } else if (this.stage === 1 && this._atTarget(ctx) && ctx.driving) {
+        this._complete(ctx);
+      }
+    } else if (id === 'tailshake') {
+      if (this._atTarget(ctx)) {
+        ctx.police.clear();
+        this.events.toast('You vanished. The heat is off.');
+        this._complete(ctx);
+      }
+    } else if (id === 'docks') {
+      if (this.stage === 0 && this._atTarget(ctx)) {
+        this.stage = 1;
+        this._setTarget(60, 132, 6, 'Clear the dock guards, then grab the crate');
+        for (let i = 0; i < 5; i++) {
+          const gx = 40 + (i % 3) * 9 - 8;
+          const gz = 128 + Math.floor(i / 3) * 6;
+          this.guards.push(new Guard(this.scene, gx, gz, this.rng));
         }
-        case 'chase': {
-          const car = ctx.chaseCar();
-          if (!car) { this.completeStage(); break; }
-          this.setMarker(car.mesh.position.x, car.mesh.position.z);
-          const d = dist2d(p.x, p.z, car.mesh.position.x, car.mesh.position.z);
-          if (d < 10) this.tailT += dt; else if (d > 95) { this.fail('You lost him in the traffic.'); break; }
-          else this.tailT = Math.max(0, this.tailT - dt * 0.5);
-          if (this.tailT >= s.seconds) { ctx.clearChase(); this.completeStage(); }
-          break;
+        this.events.toast('Guards on the pier — take them down!');
+      } else if (this.stage === 1) {
+        const alive = this.guards.filter((g) => !g.dead).length;
+        if (alive === 0 && this.guards.length > 0) {
+          this.stage = 2;
+          this._setTarget(60, 132, 5, 'Grab the crate on Pier 3');
         }
-        case 'race': {
-          const cps = s.checkpoints;
-          const mine = cps[this.playerCp], rivals = cps[this.rivalCp];
-          if (mine) this.setMarker(mine[0], mine[1]);
-          if (mine && arrive(mine[0], mine[1], 6.5)) { this.playerCp++; ctx.onCheckpoint?.(this.playerCp, cps.length); }
-          const rival = ctx.rivalCar();
-          if (rival && rivals && dist2d(rival.mesh.position.x, rival.mesh.position.z, rivals[0], rivals[1]) < 7) this.rivalCp++;
-          if (this.rivalCp >= cps.length && this.playerCp < cps.length) { this.fail('The rival took the Star Run.'); ctx.clearChase(); }
-          else if (this.playerCp >= cps.length) { ctx.clearChase(); this.completeStage(); }
-          break;
+      } else if (this.stage === 2 && this._atTarget(ctx)) {
+        this._complete(ctx);
+      }
+    } else if (id === 'finale') {
+      const points = [V3(0, 0), V3(-69, 69), V3(69, -69), V3(20, 132)];
+      if (this._atTarget(ctx)) {
+        this.checkpoint += 1;
+        if (this.checkpoint >= points.length) {
+          ctx.police.clear();
+          this._complete(ctx);
+        } else {
+          const p = points[this.checkpoint];
+          this._setTarget(p.x, p.z, 7, `Checkpoint ${this.checkpoint + 1}/3: ${this.checkpoint === 1 ? 'Coral Heights' : this.checkpoint === 2 ? 'Marina District' : 'Docks helipad'}`);
+          this.events.toast(`Checkpoint ${this.checkpoint} cleared!`);
         }
       }
-      // objective text for the HUD dossier panel
-      ctx.setObjective?.({
-        chapter: this.active + 1, title: this.current.title.toUpperCase(),
-        label: s.label, stage: this.stageIdx + 1, stages: this.current.stages.length,
-        next: this.current.stages[this.stageIdx + 1]?.label ?? 'Bring it home',
-        timer: s.type === 'timedeliver' ? Math.max(0, s.seconds - this.stageT) : (s.type === 'evade' ? Math.max(0, s.seconds - this.stageT) : null),
-        sighted: ctx.pd.sighted,
-      });
-    },
-  };
-  return director;
-}
-
-function stageLine(s) {
-  switch (s.type) {
-    case 'evade': return 'Scanner window is open. Break their line of sight, Mara.';
-    case 'deliver': return 'Cargo is aboard. Bring it home — Bayline Garage.';
-    case 'race': return 'Six lights. Beat him to every one.';
-    case 'clear': return 'Weapons free. Keep it clean, keep it quick.';
-    case 'chase': return 'There he goes. Stay on his tail lights.';
-    default: return 'On your way. The marker is gold, the clock is not your friend.';
+    }
   }
-}
 
-export function formatTime(sec) {
-  const s = Math.max(0, Math.ceil(sec));
-  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  // Guards shoot and take hits; called from the main loop.
+  updateGuards(dt, ctx, combat) {
+    for (const g of this.guards) {
+      g.update(dt, ctx.pos, combat, (dmg) => {
+        if (ctx.player.takeDamage(dmg)) ctx.onPlayerDown?.();
+      });
+    }
+  }
+
+  guardTargets() {
+    return this.guards.map((g) => ({
+      group: g.group, radius: g.radius, dead: g.dead,
+      onHit: (dmg) => g.onHit(dmg),
+    }));
+  }
 }

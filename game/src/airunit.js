@@ -1,80 +1,95 @@
-// AIR-1 OSPREY, the Shores PD helicopter: it joins at three stars, hangs over
-// the chase with a lagging orbit, and pins its searchlight on the player —
-// which is why hiding stops working while it is overhead.
+// Palm Shores — airunit.js
+// The police helicopter: appears at 4+ stars, circles above the player
+// with a visible searchlight cone that tracks them and keeps the heat
+// from decaying while it watches.
 
 import * as THREE from 'three';
-import { glowTexture } from './textures.js';
-import { dist2d } from './random.js';
+import { WANTED } from './config.js';
 
-export function createAirUnit(scene) {
+function makeHeli() {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1b1b24, metalness: 0.5, roughness: 0.4 });
-  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf2f0ea, metalness: 0.4, roughness: 0.4 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.7, 4.6), bodyMat); body.castShadow = true; g.add(body);
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.04, 0.5, 4.64), whiteMat); stripe.position.y = -0.2; g.add(stripe);
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 4.4), bodyMat); tail.position.set(0, 0.25, -4.2); g.add(tail);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.2, 0.8), bodyMat); fin.position.set(0, 0.7, -6.2); g.add(fin);
-  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.85, 1.1), new THREE.MeshStandardMaterial({ color: 0x14202e, metalness: 0.7, roughness: 0.08, envMapIntensity: 1.6 }));
-  glass.position.set(0, 0.3, 2.05); g.add(glass); // cockpit canopy
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.7, 0.8), bodyMat); nose.position.set(0, -0.35, 2.3); g.add(nose);
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.3, 8), bodyMat); hub.position.y = 1.05; g.add(hub);
-  const rotor = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.05, 0.5), new THREE.MeshStandardMaterial({ color: 0x0c0c10 }));
-  rotor.position.y = 1.15; g.add(rotor);
-  const rotor2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 10.6), rotor.material);
-  rotor2.position.y = 1.15; g.add(rotor2);
-  for (const [sx, col] of [[-1.15, 0xff2038], [1.15, 0x38ff70]]) { // nav strobes on the skids
-    const st = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: col, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    st.position.set(sx, -1.1, 0); st.scale.setScalar(1.35); g.add(st);
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.4, metalness: 0.6 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 4.6), bodyMat);
+  g.add(body);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.9, 1.4),
+    new THREE.MeshStandardMaterial({ color: 0x0e1626, roughness: 0.1, metalness: 0.9 }));
+  glass.position.set(0, 0.1, 2.0);
+  g.add(glass);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 4.2), bodyMat);
+  tail.position.set(0, 0.3, -4.0);
+  g.add(tail);
+  const rotorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
+  const rotor = new THREE.Mesh(new THREE.BoxGeometry(11, 0.08, 0.5), rotorMat);
+  rotor.position.y = 1.0;
+  g.add(rotor);
+  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.2, 0.4), rotorMat);
+  tailRotor.position.set(0.3, 0.4, -5.8);
+  g.add(tailRotor);
+  const skidMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6, metalness: 0.7 });
+  for (const sx of [-0.8, 0.8]) {
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 4.0), skidMat);
+    skid.position.set(sx, -1.0, 0.4);
+    g.add(skid);
   }
-  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.4, 0.16), rotor.material);
-  tailRotor.position.set(0.2, 0.7, -6.2); g.add(tailRotor);
-  for (const s of [-1, 1]) {
-    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 3.4), bodyMat);
-    skid.position.set(s * 0.95, -1.15, 0); g.add(skid);
-    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.6, 0.1), bodyMat);
-    strut.position.set(s * 0.9, -0.75, 0.6); g.add(strut);
-  }
-  // searchlight: a real spotlight plus a visible cone and a pool of light
-  const spot = new THREE.SpotLight(0xcfe6ff, 1700, 95, 0.32, 0.45, 1.1);
-  g.add(spot); g.add(spot.target);
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(6.4, 27, 20, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
-  cone.position.y = -14.2; g.add(cone);
-  const pool = new THREE.Mesh(new THREE.CircleGeometry(5.6, 20),
-    new THREE.MeshBasicMaterial({ map: glowTexture('rgba(200,225,255,0.85)', 'rgba(200,225,255,0)'), transparent: true, depthWrite: false }));
-  pool.rotation.x = -Math.PI / 2; pool.position.y = 0.06;
-  scene.add(pool); scene.add(g);
-  g.position.set(320, 70, -320);
+  // Searchlight: a real spotlight + a fake translucent cone.
+  const spot = new THREE.SpotLight(0xfff2c0, 900, 90, 0.28, 0.5, 1.2);
+  spot.position.set(0, -0.8, 0.5);
+  g.add(spot);
+  g.add(spot.target);
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(7, 34, 16, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff2c0, transparent: true, opacity: 0.10,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    }),
+  );
+  cone.position.set(0, -17.5, 0.5);
+  cone.rotation.x = Math.PI; // apex up at the heli
+  g.add(cone);
+  g.userData.heli = { rotor, spot, cone };
+  return g;
+}
 
-  const heli = {
-    mesh: g, active: false, angle: 0,
-    update(dt, target, t) {
-      const want = target.stars >= 3;
-      this.active = want;
-      this.angle += dt * 0.24;
-      const orbit = 13;
-      const gx = want ? target.x + Math.sin(this.angle) * orbit : 320;
-      const gz = want ? target.z + Math.cos(this.angle) * orbit : -320;
-      const gy = want ? 27 : 70;
-      const k = 1 - Math.exp(-dt * (want ? 1.6 : 0.7));
-      g.position.x += (gx - g.position.x) * k;
-      g.position.z += (gz - g.position.z) * k;
-      g.position.y += (gy - g.position.y) * k;
-      g.rotation.y = Math.atan2(target.x - g.position.x, target.z - g.position.z);
-      rotor.rotation.y = t * 31; rotor2.rotation.y = t * 31; tailRotor.rotation.x = t * 40;
-      const lit = want && g.position.y < 40;
-      cone.visible = lit; pool.visible = lit;
-      spot.visible = lit;
-      if (lit) {
-        spot.position.set(0, -0.8, 0.8);
-        spot.target.position.set(target.x - g.position.x, -g.position.y, target.z - g.position.z);
-        pool.position.set(target.x, 0.06, target.z);
-      }
-      return lit && dist2d(g.position.x, g.position.z, target.x, target.z) < 95;
-    },
-    unitForHud(target) {
-      return { name: 'AIR-1 OSPREY', status: 'AIR SUPPORT', dist: Math.round(dist2d(g.position.x, g.position.z, target.x, target.z)) };
-    },
-  };
-  return heli;
+export class AirUnit {
+  constructor(scene) {
+    this.scene = scene;
+    this.group = null;
+    this.angle = 0;
+    this.active = false;
+  }
+
+  update(dt, now, playerPos, stars) {
+    const want = stars >= WANTED.heliAtStars;
+    if (want && !this.active) {
+      this.group = makeHeli();
+      this.group.position.set(playerPos.x + 20, 42, playerPos.z);
+      this.scene.add(this.group);
+      this.active = true;
+    } else if (!want && this.active) {
+      this.scene.remove(this.group);
+      this.group = null;
+      this.active = false;
+    }
+    if (!this.active) return;
+    this.angle += dt * 0.45;
+    const r = 24;
+    this.group.position.set(
+      playerPos.x + Math.cos(this.angle) * r,
+      42 + Math.sin(now * 0.5) * 1.5,
+      playerPos.z + Math.sin(this.angle) * r,
+    );
+    this.group.rotation.y = Math.atan2(playerPos.x - this.group.position.x, playerPos.z - this.group.position.z);
+    const heli = this.group.userData.heli;
+    heli.rotor.rotation.y += dt * 22;
+    // Searchlight tracks the player.
+    heli.spot.target.position.set(
+      playerPos.x - this.group.position.x,
+      -this.group.position.y,
+      playerPos.z - this.group.position.z,
+    );
+    heli.spot.target.updateMatrixWorld();
+  }
+
+  // While the heli watches, the player counts as "seen" for heat decay.
+  watching() { return this.active; }
 }

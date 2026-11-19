@@ -1,32 +1,40 @@
-// localStorage persistence: cash, XP, respect, finished missions, Sunset
-// Stars, garage upgrades and the radio station you left playing. Versioned
-// so an older save can never break a newer build.
+// Palm Shores — save.js
+// localStorage save: cash, mission progress, coins collected. Small,
+// versioned, and tolerant of a missing or corrupt entry.
 
-const KEY = 'palm-shores-3d-v1';
-
-export function defaultSave() {
-  return {
-    cash: 250, xp: 0, respect: 1,
-    missionsDone: [], stars: [], upgrades: [],
-    station: 0, started: false,
-  };
-}
+import { SAVE_KEY, ECONOMY } from './config.js';
 
 export function loadSave() {
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return defaultSave();
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
     const data = JSON.parse(raw);
-    return { ...defaultSave(), ...data };
-  } catch { return defaultSave(); }
+    if (typeof data !== 'object' || data === null) return null;
+    return {
+      cash: Number.isFinite(data.cash) ? data.cash : ECONOMY.startCash,
+      missionIndex: Number.isFinite(data.missionIndex) ? Math.max(0, Math.min(5, data.missionIndex | 0)) : 0,
+      coins: Number.isFinite(data.coins) ? data.coins : 0,
+      savedAt: data.savedAt || 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
-export function storeSave(save) {
-  try { localStorage.setItem(KEY, JSON.stringify(save)); } catch { /* private mode: play on unsaved */ }
+export function writeSave(state) {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      cash: state.cash,
+      missionIndex: state.missionIndex,
+      coins: state.coinsCollected,
+      savedAt: Date.now(),
+    }));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-// Respect levels: every 400 XP of work buys the street a little more trust,
-// while the HUD bar fills toward the next 1,200 XP cachet milestone.
-export function respectForXp(xp) { return Math.min(9, 1 + Math.floor(xp / 400)); }
-export function xpIntoLevel(xp) { return xp % 1200; }
-export const XP_PER_LEVEL = 1200;
+export function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* storage unavailable */ }
+}
