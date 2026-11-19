@@ -52,7 +52,7 @@ heroCar.setPos(168, -6, -Math.PI / 2);
 const player = createPlayer(scene);
 player.setPos(163, -2, Math.PI / 2);
 
-const traffic = createTraffic(scene, world, rng, 14);
+const traffic = createTraffic(scene, world, rng, 18);
 const parked = spawnParkedCars(scene, world, rng);
 const peds = createPedestrians(scene, world, rng, 16);
 const pd = createPolice(scene, world, rng);

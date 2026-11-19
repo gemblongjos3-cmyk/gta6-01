@@ -87,12 +87,25 @@ export function makeCarEntity(scene, { kind = 'sedan', color = 0xffffff, police 
     }
   }
   if (kind === 'coupe' && !police) underGlow(g, color, 3.4, L * 1.3, 0.30); // the Vespera's pink sheen on the asphalt
-  // lights
+  // bumpers, front and rear
+  box(W * 0.99, 0.17, 0.16, chromeMat, 0, 0.4, L / 2 + 0.03, g);
+  box(W * 0.99, 0.17, 0.16, chromeMat, 0, 0.4, -L / 2 - 0.03, g);
+  // lights, with additive halos so they bloom against the dusk
   box(0.34, 0.12, 0.06, headMat, -W * 0.3, 0.72, L / 2 + 0.01, g);
   box(0.34, 0.12, 0.06, headMat, W * 0.3, 0.72, L / 2 + 0.01, g);
   box(0.36, 0.1, 0.06, tailMat, -W * 0.3, 0.78, -L / 2 - 0.01, g);
   box(0.36, 0.1, 0.06, tailMat, W * 0.3, 0.78, -L / 2 - 0.01, g);
   if (kind === 'coupe') box(W * 0.62, 0.07, 0.05, tailMat, 0, 0.82, -L / 2 - 0.01, g); // full-width light bar
+  for (const s of [-1, 1]) {
+    const hg = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: 0xffe9b0, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    hg.position.set(s * W * 0.3, 0.72, L / 2 + 0.15); hg.scale.setScalar(1.15); g.add(hg);
+  }
+  const tg = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: 0xff2233, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  tg.position.set(0, 0.78, -L / 2 - 0.15); tg.scale.set(2.1, 0.75, 1); g.add(tg);
+  if (kind === 'coupe') for (const s of [-1, 1]) { // twin exhausts
+    const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.2, 8), chromeMat);
+    ex.rotation.x = Math.PI / 2; ex.position.set(s * 0.52, 0.3, -L / 2 - 0.06); g.add(ex);
+  }
   // wheels on steering pivots at the front
   const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 12);
   const wheels = [], pivots = [];
@@ -142,7 +155,7 @@ export function createTraffic(scene, world, rng, count = 14) {
     // right-hand traffic: offset to the right of the direction of travel
     const off = laneOffset(center) * ent.dir * (vertical ? 1 : -1);
     if (vertical) ent.setPos(center + off, along, ent.dir > 0 ? 0 : Math.PI);
-    else ent.setPos(along, center - off, ent.dir > 0 ? -Math.PI / 2 : Math.PI / 2);
+    else ent.setPos(along, center - off, ent.dir > 0 ? Math.PI / 2 : -Math.PI / 2); // nose first, always
     ent.speed = ent.cruise;
     cars.push(ent);
   }
@@ -192,7 +205,7 @@ function turnCar(car, crossCenter) {
   car.dir = Math.random() < 0.5 ? 1 : -1;
   const off = laneOffset(car.roadCenter) * car.dir;
   if (car.axis === 'z') { p.x = car.roadCenter + off; car.setPos(p.x, p.z, car.dir > 0 ? 0 : Math.PI); }
-  else { p.z = car.roadCenter - off; car.setPos(p.x, p.z, car.dir > 0 ? -Math.PI / 2 : Math.PI / 2); }
+  else { p.z = car.roadCenter - off; car.setPos(p.x, p.z, car.dir > 0 ? Math.PI / 2 : -Math.PI / 2); }
   car.mesh.position.y = 0;
 }
 

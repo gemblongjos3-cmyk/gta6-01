@@ -14,8 +14,18 @@ export function createAirUnit(scene) {
   const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.04, 0.5, 4.64), whiteMat); stripe.position.y = -0.2; g.add(stripe);
   const tail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 4.4), bodyMat); tail.position.set(0, 0.25, -4.2); g.add(tail);
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.2, 0.8), bodyMat); fin.position.set(0, 0.7, -6.2); g.add(fin);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.85, 1.1), new THREE.MeshStandardMaterial({ color: 0x14202e, metalness: 0.7, roughness: 0.08, envMapIntensity: 1.6 }));
+  glass.position.set(0, 0.3, 2.05); g.add(glass); // cockpit canopy
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.7, 0.8), bodyMat); nose.position.set(0, -0.35, 2.3); g.add(nose);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.3, 8), bodyMat); hub.position.y = 1.05; g.add(hub);
   const rotor = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.05, 0.5), new THREE.MeshStandardMaterial({ color: 0x0c0c10 }));
   rotor.position.y = 1.15; g.add(rotor);
+  const rotor2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 10.6), rotor.material);
+  rotor2.position.y = 1.15; g.add(rotor2);
+  for (const [sx, col] of [[-1.15, 0xff2038], [1.15, 0x38ff70]]) { // nav strobes on the skids
+    const st = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: col, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    st.position.set(sx, -1.1, 0); st.scale.setScalar(0.9); g.add(st);
+  }
   const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.4, 0.16), rotor.material);
   tailRotor.position.set(0.2, 0.7, -6.2); g.add(tailRotor);
   for (const s of [-1, 1]) {
@@ -51,7 +61,7 @@ export function createAirUnit(scene) {
       g.position.z += (gz - g.position.z) * k;
       g.position.y += (gy - g.position.y) * k;
       g.rotation.y = Math.atan2(target.x - g.position.x, target.z - g.position.z);
-      rotor.rotation.y = t * 31; tailRotor.rotation.x = t * 40;
+      rotor.rotation.y = t * 31; rotor2.rotation.y = t * 31; tailRotor.rotation.x = t * 40;
       const lit = want && g.position.y < 40;
       cone.visible = lit; pool.visible = lit;
       spot.visible = lit;

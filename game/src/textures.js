@@ -41,26 +41,74 @@ const FACADE_PALETTES = [
 
 // An art-deco facade: banded windows (some lit gold for the evening), a neon
 // trim line under the parapet and a striped awning over the ground floor.
-export function facadeTexture(rng, floors, cols) {
+// A facade AND its emissive twin, drawn in one pass so the lit windows match:
+// the colour map carries the deco detailing, the emissive map is black except
+// for the windows that are on — at dusk the building genuinely glows.
+export function facadePair(rng, floors, cols) {
   const [wall, trim] = FACADE_PALETTES[Math.floor(rng() * FACADE_PALETTES.length)];
   const c = canvas(256, 512), g = c.getContext('2d');
+  const e = canvas(256, 512), ge = e.getContext('2d');
+  const shade = g.createLinearGradient(0, 0, 256, 0);
+  shade.addColorStop(0, 'rgba(0,0,0,0.16)'); shade.addColorStop(0.5, 'rgba(255,255,255,0.05)'); shade.addColorStop(1, 'rgba(0,0,0,0.16)');
   g.fillStyle = wall; g.fillRect(0, 0, 256, 512);
-  g.fillStyle = 'rgba(0,0,0,0.08)'; g.fillRect(0, 0, 256, 10);
-  g.fillStyle = trim; g.fillRect(0, 12, 256, 5);
+  g.fillStyle = shade; g.fillRect(0, 0, 256, 512);
+  ge.fillStyle = '#000'; ge.fillRect(0, 0, 256, 512);
+  // parapet + cornice
+  g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(0, 0, 256, 14);
+  g.fillStyle = trim; g.fillRect(0, 14, 256, 5);
+  g.fillStyle = 'rgba(255,255,255,0.20)'; g.fillRect(0, 19, 256, 2);
   const ww = 256 / cols, wh = 512 / (floors + 1);
-  for (let f = 0; f < floors; f++) for (let col = 0; col < cols; col++) {
-    const x = col * ww + ww * 0.24, y = 30 + f * wh + wh * 0.16, w = ww * 0.52, h = wh * 0.6;
-    const lit = rng() < 0.55;
-    g.fillStyle = lit ? (rng() < 0.7 ? '#ffe3a1' : '#bdeaff') : '#352c4c';
-    g.fillRect(x, y, w, h);
-    g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(x, y, w, 3);
-    g.fillStyle = trim; g.fillRect(x - 3, y - 3, w + 6, 3);
+  for (let f = 0; f < floors; f++) {
+    // deco band between floors
+    g.fillStyle = 'rgba(0,0,0,0.13)'; g.fillRect(0, 26 + f * wh, 256, 3);
+    g.fillStyle = trim; g.globalAlpha = 0.5; g.fillRect(0, 29 + f * wh, 256, 2); g.globalAlpha = 1;
+    for (let col = 0; col < cols; col++) {
+      const x = col * ww + ww * 0.24, y = 30 + f * wh + wh * 0.16, w = ww * 0.52, h = wh * 0.6;
+      // window frame + sill
+      g.fillStyle = 'rgba(20,12,30,0.85)'; g.fillRect(x - 3, y - 3, w + 6, h + 6);
+      g.fillStyle = 'rgba(255,255,255,0.16)'; g.fillRect(x - 3, y + h + 3, w + 6, 2);
+      const lit = rng() < 0.55;
+      const warm = rng() < 0.72;
+      const colr = lit ? (warm ? '#ffd98a' : '#a8e6ff') : '#2c2440';
+      g.fillStyle = colr; g.fillRect(x, y, w, h);
+      if (lit) {
+        ge.fillStyle = warm ? '#ffb85c' : '#7fd4ff'; ge.fillRect(x, y, w, h);
+        if (rng() < 0.4) { ge.fillStyle = 'rgba(0,0,0,0.45)'; ge.fillRect(x, y + h * 0.45, w, h * 0.55); g.fillStyle = 'rgba(0,0,0,0.28)'; g.fillRect(x, y + h * 0.45, w, h * 0.55); } // half-drawn blind
+        g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(x, y, w, 3);
+      }
+      if (rng() < 0.18) { g.fillStyle = '#4a4258'; g.fillRect(x + w * 0.2, y + h + 6, w * 0.6, 5); } // AC unit under some windows
+    }
   }
   const gy = 512 - wh;
-  g.fillStyle = '#241a33'; g.fillRect(0, gy, 256, wh);
+  g.fillStyle = '#1d1429'; g.fillRect(0, gy, 256, wh);
   for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#f7f3ea' : trim; g.fillRect(i * 32, gy - 12, 32, 12); }
-  g.fillStyle = '#ffd98a'; g.fillRect(108, gy + 14, 40, wh - 14);
-  return tex(c);
+  // storefront glass across the ground floor, lit from inside
+  for (let i = 0; i < 4; i++) {
+    const sx = 10 + i * 62;
+    g.fillStyle = '#ffd98a'; g.fillRect(sx, gy + 16, 50, wh - 26);
+    ge.fillStyle = i % 2 ? '#ff9e4f' : '#ffd98a'; ge.fillRect(sx, gy + 16, 50, wh - 26);
+    g.fillStyle = 'rgba(29,20,41,0.9)'; g.fillRect(sx + 22, gy + 16, 5, wh - 26);
+  }
+  return { map: tex(c), emissive: tex(e) };
+}
+
+export function facadeTexture(rng, floors, cols) { return facadePair(rng, floors, cols).map; }
+
+// Ground-floor storefront band wrapped around a building's base.
+export function storefrontTexture(rng) {
+  const c = canvas(512, 64), g = c.getContext('2d');
+  const e = canvas(512, 64), ge = e.getContext('2d');
+  g.fillStyle = '#191124'; g.fillRect(0, 0, 512, 64);
+  ge.fillStyle = '#000'; ge.fillRect(0, 0, 512, 64);
+  const cols = ['#ffb85c', '#7fd4ff', '#ff8fb0', '#ffe3a1'];
+  for (let i = 0; i < 6; i++) {
+    const x = 8 + i * 84, colr = cols[Math.floor(rng() * cols.length)];
+    g.fillStyle = colr; g.fillRect(x, 14, 68, 50);
+    ge.fillStyle = colr; ge.fillRect(x, 14, 68, 50);
+    g.fillStyle = 'rgba(20,12,28,0.85)'; g.fillRect(x + 31, 14, 5, 50); g.fillRect(x, 36, 68, 4);
+    g.fillStyle = i % 2 ? '#f7f3ea' : '#e0527a'; g.fillRect(x - 2, 4, 72, 8); // awning stripe
+  }
+  return { map: tex(c), emissive: tex(e) };
 }
 
 export function roofTexture(rng) {
@@ -74,21 +122,25 @@ export function roofTexture(rng) {
 // Asphalt with a worn centre line; drawn per road segment and repeated.
 export function roadTexture() {
   const c = canvas(128, 256), g = c.getContext('2d');
-  g.fillStyle = '#333040'; g.fillRect(0, 0, 128, 256);
+  g.fillStyle = '#201c2b'; g.fillRect(0, 0, 128, 256);
+  for (let i = 0; i < 26; i++) { // damp patches and repairs
+    g.fillStyle = `rgba(${10 + Math.random() * 16},${8 + Math.random() * 12},${20 + Math.random() * 18},0.35)`;
+    g.beginPath(); g.ellipse(Math.random() * 128, Math.random() * 256, 8 + Math.random() * 22, 12 + Math.random() * 30, 0, 0, 7); g.fill();
+  }
   for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * 0.05})`; g.fillRect(Math.random() * 128, Math.random() * 256, 1.5, 1.5); }
   for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.16})`; g.fillRect(Math.random() * 128, Math.random() * 256, 2, 2); }
   g.fillStyle = '#f7f3ea'; g.fillRect(2, 0, 4, 256); g.fillRect(122, 0, 4, 256);
   g.fillStyle = '#ffd23e'; g.fillRect(61, 8, 6, 62); g.fillRect(61, 150, 6, 62);
   // sunset sheen baked into the middle of the lane
   const sheen = g.createLinearGradient(0, 0, 128, 0);
-  sheen.addColorStop(0, 'rgba(255,110,140,0)'); sheen.addColorStop(0.5, 'rgba(255,120,110,0.13)'); sheen.addColorStop(1, 'rgba(255,110,140,0)');
+  sheen.addColorStop(0, 'rgba(255,110,140,0)'); sheen.addColorStop(0.5, 'rgba(255,120,110,0.20)'); sheen.addColorStop(1, 'rgba(255,110,140,0)');
   g.fillStyle = sheen; g.fillRect(0, 0, 128, 256);
   return tex(c);
 }
 
 export function crosswalkTexture() {
   const c = canvas(128, 128), g = c.getContext('2d');
-  g.fillStyle = '#333040'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#201c2b'; g.fillRect(0, 0, 128, 128);
   g.fillStyle = 'rgba(247,243,234,0.85)';
   for (let i = 0; i < 5; i++) g.fillRect(10 + i * 23, 12, 13, 104);
   return tex(c);
@@ -126,14 +178,36 @@ export function waterTexture() {
 export function palmLeafTexture() {
   const c = canvas(128, 128), g = c.getContext('2d');
   g.clearRect(0, 0, 128, 128);
-  g.strokeStyle = '#35a05c'; g.lineWidth = 5; g.beginPath(); g.moveTo(4, 124); g.quadraticCurveTo(50, 50, 124, 18); g.stroke();
-  g.lineWidth = 2.4;
-  for (let t = 0.08; t < 0.98; t += 0.07) {
-    const x = 4 + (124 - 4) * t, y = 124 + (18 - 124) * t * t - Math.sin(t * Math.PI) * 22;
-    g.strokeStyle = t % 0.14 < 0.07 ? '#4cc673' : '#35a05c';
-    g.beginPath(); g.moveTo(x, y); g.lineTo(x + 14, y + 20 + t * 12); g.stroke();
-    g.beginPath(); g.moveTo(x, y); g.lineTo(x - 4, y + 22 + t * 10); g.stroke();
+  // one full frond: a curved rib carrying dense tapered leaflets both sides
+  const rib = (t) => [4 + 120 * t, 124 - 106 * t * t - Math.sin(t * Math.PI) * 22];
+  for (let t = 0.06; t < 0.99; t += 0.035) {
+    const [x, y] = rib(t), len = 15 + t * 15, shade = 0.75 + t * 0.45;
+    for (const s of [1, -0.82]) {
+      const ex = x + 13 * s + t * 6 * s, ey = y + len;
+      g.fillStyle = `rgba(${52 * shade | 0},${168 * shade | 0},${94 * shade | 0},0.95)`;
+      g.beginPath();
+      g.moveTo(x - 1.6, y); g.lineTo(x + 1.6, y);
+      g.lineTo(ex, ey); g.closePath(); g.fill();
+    }
   }
+  g.strokeStyle = '#2a7a46'; g.lineWidth = 4.4; g.beginPath();
+  g.moveTo(4, 124); g.quadraticCurveTo(50, 50, 124, 18); g.stroke();
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+// A vertical light streak for wet-road reflections: soft-edged, bright at the
+// source end and dissolving with distance. Tint it per light source.
+export function streakTexture() {
+  const c = canvas(64, 256), g = c.getContext('2d');
+  const img = g.createImageData(64, 256);
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 64; x++) {
+    const u = (x - 32) / 32, v = y / 256;
+    const a = Math.max(0, (1 - u * u)) ** 1.6 * (1 - v) ** 1.7;
+    const i = (y * 64 + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = 255; img.data[i + 3] = a * 255;
+  }
+  g.putImageData(img, 0, 0);
   const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
   return t;
 }

@@ -20,16 +20,23 @@ export function districtAt(x, z) {
 }
 
 function palmCrownGeometry(leafTex) {
-  // Eight alpha-cut fronds fanned from one point, drooping at the tips.
+  // Fourteen alpha-cut fronds in two tiers, baked at the top of the bent
+  // trunk (offset +1.1 x, +6.3 y) so crown and trunk share one instance matrix.
   const pos = [], uv = [], idx = [];
-  for (let f = 0; f < 8; f++) {
-    const a = (f / 8) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
-    const px = -sa, pz = ca, base = f * 4;
-    const tipX = ca * 3.9, tipZ = sa * 3.9;
-    pos.push(-px * 0.06, 0, -pz * 0.06, px * 0.06, 0, pz * 0.06, tipX - px * 0.3, -1.3, tipZ - pz * 0.3, tipX + px * 0.3, -1.3, tipZ + pz * 0.3);
-    uv.push(0, 0, 1, 0, 0.08, 1, 0.92, 1);
-    idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
-  }
+  let base = 0;
+  const tier = (n, len, droop, y0, phase) => {
+    for (let f = 0; f < n; f++) {
+      const a = ((f + phase) / n) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      const px = -sa, pz = ca;
+      const tipX = 1.1 + ca * len, tipZ = sa * len;
+      pos.push(1.1 - px * 0.06, y0, -pz * 0.06, 1.1 + px * 0.06, y0, pz * 0.06, tipX - px * 0.34, y0 - droop, tipZ - pz * 0.34, tipX + px * 0.34, y0 - droop, tipZ + pz * 0.34);
+      uv.push(0, 0, 1, 0, 0.08, 1, 0.92, 1);
+      idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+      base += 4;
+    }
+  };
+  tier(8, 4.3, 1.6, 6.3, 0);
+  tier(6, 3.0, 0.8, 6.55, 0.5);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
@@ -47,7 +54,7 @@ export function buildWorld(scene, rng) {
   const addCollider = (x, z, w, d) => world.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
 
   // ---- sky, light and air -------------------------------------------------
-  scene.fog = new THREE.Fog(0xc64b74, 90, 460);
+  scene.fog = new THREE.Fog(0xb84a78, 85, 430);
   scene.environment = TX.sunsetEnvTexture(); // the sunset every glossy surface reflects
   const sky = new THREE.Mesh(new THREE.SphereGeometry(880, 24, 16),
     new THREE.MeshBasicMaterial({ map: TX.skyTexture(), side: THREE.BackSide, fog: false }));
@@ -122,9 +129,21 @@ export function buildWorld(scene, rng) {
     }
   }
   // the avenue wears the sunset: a long wet-light streak running at the sun
+  const streakTex = TX.streakTexture();
+  const sunStreakTex = streakTex.clone(); sunStreakTex.center.set(0.5, 0.5); sunStreakTex.rotation = Math.PI / 2; sunStreakTex.needsUpdate = true;
   const streak = new THREE.Mesh(new THREE.PlaneGeometry(380, 15),
-    new THREE.MeshBasicMaterial({ map: glowTex, color: 0xff9a5c, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    new THREE.MeshBasicMaterial({ map: sunStreakTex, color: 0xff9a5c, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
   streak.rotation.x = -Math.PI / 2; streak.position.set(0, 0.045, 0); scene.add(streak);
+  const streakCore = new THREE.Mesh(new THREE.PlaneGeometry(380, 5),
+    new THREE.MeshBasicMaterial({ map: sunStreakTex, color: 0xffc46b, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  streakCore.rotation.x = -Math.PI / 2; streakCore.position.set(0, 0.05, 0); scene.add(streakCore);
+  // one wet reflection: an additive streak decal lying on the asphalt
+  const addStreak = (x, z, w, l, color, opacity) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l),
+      new THREE.MeshBasicMaterial({ map: streakTex, color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    m.rotation.x = -Math.PI / 2; m.position.set(x, 0.05, z); m.renderOrder = 2; scene.add(m);
+    return m;
+  };
   // Sunset Avenue median: palms and lamps between the lanes
   const medianMat = new THREE.MeshStandardMaterial({ color: 0x4a3550, roughness: 0.9 });
   for (let k = -3; k < 3; k++) {
@@ -146,9 +165,12 @@ export function buildWorld(scene, rng) {
   const roofMats = [];
   const facadeMats = [];
   for (let i = 0; i < 10; i++) {
-    facadeMats.push(new THREE.MeshStandardMaterial({ map: TX.facadeTexture(rng, 6, 5), roughness: 0.85 }));
+    const pair = TX.facadePair(rng, 6, 5);
+    facadeMats.push(new THREE.MeshStandardMaterial({ map: pair.map, emissiveMap: pair.emissive, emissive: 0xffffff, emissiveIntensity: 1.05, roughness: 0.85 }));
     roofMats.push(new THREE.MeshStandardMaterial({ map: TX.roofTexture(rng), roughness: 1 }));
   }
+  const shopPair = TX.storefrontTexture(rng);
+  const shopMat = new THREE.MeshStandardMaterial({ map: shopPair.map, emissiveMap: shopPair.emissive, emissive: 0xffffff, emissiveIntensity: 1.1, roughness: 0.7 });
   const neonTrims = [0xff4fa3, 0x22d3ee, 0xffd23e, 0x7dff6a, 0xff8c42].map(col =>
     new THREE.MeshStandardMaterial({ color: 0x181020, emissive: col, emissiveIntensity: 2.2 }));
   const crateMat = new THREE.MeshStandardMaterial({ color: 0x9a6a42, roughness: 0.9 });
@@ -160,6 +182,11 @@ export function buildWorld(scene, rng) {
     b.position.set(x, h / 2, z); b.castShadow = true; b.receiveShadow = true; scene.add(b);
     const trim = new THREE.Mesh(new THREE.BoxGeometry(w + 0.35, 0.35, d + 0.35), neonTrims[matIdx % neonTrims.length]);
     trim.position.set(x, h - 0.4, z); scene.add(trim);
+    // parapet cap + a glowing storefront band around the base
+    const parapet = new THREE.Mesh(new THREE.BoxGeometry(w + 0.55, 0.55, d + 0.55), roofMats[matIdx % roofMats.length]);
+    parapet.position.set(x, h + 0.12, z); parapet.castShadow = true; scene.add(parapet);
+    const band = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 2.7, d + 0.4), shopMat);
+    band.position.set(x, 1.35, z); scene.add(band);
     if (rng() < 0.5) { // rooftop clutter: AC boxes and a water tank
       const ac = new THREE.Mesh(new THREE.BoxGeometry(rngRange(rng, 2, 4), 1.1, rngRange(rng, 2, 3)), crateMat2);
       ac.position.set(x + rngRange(rng, -w / 4, w / 4), h + 0.55, z + rngRange(rng, -d / 4, d / 4)); ac.castShadow = true; scene.add(ac);
@@ -257,21 +284,24 @@ export function buildWorld(scene, rng) {
 
   // ---- billboards ------------------------------------------------------------
   const billboards = [
-    { main: 'FLAMINGO FM', sub: '104.5 — THE FLAMINGO', bg: '#ff4fa3', fg: '#ffffff', ac: '#ffd23e', x: 44, z: -27, ry: Math.PI * 0.78, big: true },
+    { main: 'FLAMINGO FM', sub: '104.5 — THE FLAMINGO', bg: '#ff4fa3', fg: '#ffffff', ac: '#ffd23e', x: 20, z: -13.5, ry: Math.PI * 0.72, big: true },
     { main: 'HOTEL SOLANA', sub: 'ROOMS FROM $40', bg: '#14224a', fg: '#7fd4c1', ac: '#ff8c42', x: -70, z: 26, ry: -Math.PI * 0.2 },
     { main: 'VESPERA GT', sub: 'TEST DRIVE — ISLA VERDE', bg: '#1c1030', fg: '#ff4fa3', ac: '#ffffff', x: -128, z: -27, ry: Math.PI * 0.85 },
     { main: 'CAFE BRISA', sub: 'OPEN ALL NIGHT', bg: '#3fbf8f', fg: '#10301f', ac: '#ffd23e', x: 120, z: 27, ry: Math.PI * 1.1 },
   ];
   for (const b of billboards) {
-    const w = b.big ? 30 : 20, h = w / 2;
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 13, 8), new THREE.MeshStandardMaterial({ color: 0x2c2438 }));
-    pole.position.set(b.x, 6.5, b.z); pole.castShadow = true; scene.add(pole);
+    const w = b.big ? 30 : 20, h = w / 2, poleH = b.tall ? 15 : 13;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, poleH, 8), new THREE.MeshStandardMaterial({ color: 0x2c2438 }));
+    pole.position.set(b.x, poleH / 2, b.z); pole.castShadow = true; scene.add(pole);
     const boardTex = TX.billboardTexture(b.main, b.sub, b.bg, b.fg, b.ac);
     for (const flip of [0, Math.PI]) { // back-to-back pair, so the art reads from both approaches
       const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
         new THREE.MeshBasicMaterial({ map: boardTex }));
-      board.position.set(b.x, 13 + h / 2, b.z); board.rotation.y = b.ry + flip; scene.add(board);
+      board.position.set(b.x, poleH + h / 2, b.z); board.rotation.y = b.ry + flip; scene.add(board);
     }
+    // the board's colour smeared down the wet avenue toward the traffic
+    const hexv = parseInt(b.bg.slice(1), 16), lum = ((hexv >> 16 & 255) * 0.3 + (hexv >> 8 & 255) * 0.5 + (hexv & 255) * 0.2);
+    addStreak(b.x, b.z * 0.45, 9, 26, new THREE.Color(lum > 60 ? b.bg : b.fg), 0.30);
     addCollider(b.x, b.z, 1.2, 1.2);
   }
 
@@ -290,8 +320,16 @@ export function buildWorld(scene, rng) {
     palmSpots.push({ x: s, z: -12.8, big: true });
     palmSpots.push({ x: s + 8, z: 12.8, big: true });
   }
-  const trunkGeo = new THREE.CylinderGeometry(0.13, 0.24, 6.4, 6);
+  const trunkGeo = new THREE.CylinderGeometry(0.13, 0.24, 6.4, 7);
   trunkGeo.translate(0, 3.2, 0);
+  { // bend the trunk: the top leans 1.1 m off the base, crown baked to match
+    const pa = trunkGeo.attributes.position;
+    for (let i = 0; i < pa.count; i++) {
+      const y = pa.getY(i), t = Math.max(0, Math.min(1, y / 6.4));
+      pa.setX(i, pa.getX(i) + t * t * 1.1);
+    }
+    trunkGeo.computeVertexNormals();
+  }
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a5a40, roughness: 1 });
   const crownMat = new THREE.MeshStandardMaterial({ map: TX.palmLeafTexture(), alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.9, emissive: 0x14401f, emissiveIntensity: 0.55 });
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, palmSpots.length);
@@ -303,8 +341,7 @@ export function buildWorld(scene, rng) {
     dummy.rotation.set(lean, rng() * Math.PI * 2, lean * 0.7);
     dummy.scale.setScalar(h); dummy.updateMatrix();
     trunks.setMatrixAt(i, dummy.matrix);
-    dummy.position.y = 6.4 * h - 0.15; dummy.updateMatrix();
-    crowns.setMatrixAt(i, dummy.matrix);
+    crowns.setMatrixAt(i, dummy.matrix); // crown geometry is baked at the bent trunk top
   });
   trunks.castShadow = true; crowns.castShadow = true;
   scene.add(trunks); scene.add(crowns);
@@ -347,11 +384,13 @@ export function buildWorld(scene, rng) {
     blade.position.set(s.x, 5.6, s.z); blade.rotation.y = s.z < 0 ? 0 : Math.PI; scene.add(blade);
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: lampGlowTex, color: s.hex, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false }));
     halo.position.set(s.x, 5.6, s.z); halo.scale.set(6, 9, 1); scene.add(halo);
-    // the sign's colour bleeding onto the wet asphalt below
-    const bleed = new THREE.Mesh(new THREE.PlaneGeometry(5, 11),
-      new THREE.MeshBasicMaterial({ map: lampGlowTex, color: s.hex, transparent: true, opacity: 0.20, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    bleed.rotation.x = -Math.PI / 2; bleed.position.set(s.x, 0.05, s.z * 0.55); bleed.renderOrder = 2; scene.add(bleed);
+    // the sign's colour streaking down the wet asphalt toward the lanes
+    addStreak(s.x, s.z * 0.5, 4.5, 15, s.hex, 0.32);
   }
+  // lamp light streaks along the avenue + cars parked at its curbs
+  for (const p of lampSpots) if (Math.abs(p.z) <= 12) addStreak(p.x, p.z, 7, 1.8, 0xffc46b, 0.13);
+  for (const px of [-176, -118, -34, 38, 128, 186]) world.parkingSpots.push({ x: px, z: -12.4, heading: -Math.PI / 2 });
+  for (const px of [-150, -64, 12, 84, 158]) world.parkingSpots.push({ x: px, z: 12.4, heading: Math.PI / 2 });
 
   // beach umbrellas on Coral Strand, like the ones in every holiday photo
   const umbMat = new THREE.MeshStandardMaterial({ color: 0xff5c7a, roughness: 0.8, side: THREE.DoubleSide });

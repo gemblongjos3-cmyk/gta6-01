@@ -32,6 +32,11 @@ export function stageShot(game, name) {
     pd.placeUnit(2, 118, -1.5, -Math.PI / 2, 'PURSUIT');
     pd.placeUnit(3, 84, 6.0, -Math.PI / 2, 'PURSUIT');
     pd.spawnRoadblockAt(38, 0, false);
+    // city life inside the frame: traffic on the avenue, a car at the curb
+    const tc = game.traffic?.cars ?? [];
+    if (tc[0]) { tc[0].setPos(58, -5.4, -Math.PI / 2); tc[0].speed = 0; }
+    if (tc[1]) { tc[1].setPos(64, 5.6, Math.PI / 2); tc[1].speed = 0; }
+    if (tc[2]) { tc[2].setPos(126, 12.4, Math.PI / 2); tc[2].speed = 0; }
     for (let i = 0; i < 70; i++) heli.update(0.05, { x: 96, z: 2.5, stars: 4 }, i * 0.05);
     // pin the Osprey in the sky ahead, small against the sunset like the reference
     heli.mesh.position.set(66, 17, -7);
