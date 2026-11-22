@@ -1,80 +1,73 @@
 // Palm Shores — collectibles.js
-// Cash pickups and palm coins scattered around the city: walk or drive
-// over them to collect. Collected coins persist in the save.
-
+// One job: cash pickups and palm-star collectibles scattered around the city —
+// spin, bob, and pay out when the player walks or drives through them.
 import * as THREE from 'three';
-import { ECONOMY } from './config.js';
+import { COLLECTIBLES } from './config.js';
 
-export class Collectibles {
-  constructor(scene, city, rng) {
-    this.scene = scene;
-    this.city = city;
-    this.rng = rng;
-    this.items = []; // {group, kind, value, taken}
-    this.coinsCollected = 0;
-    this._spawn();
+function makeCashMesh() {
+  const g = new THREE.Group();
+  const bill = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.06, 0.45),
+    new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.5 }));
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.08, 0.14),
+    new THREE.MeshBasicMaterial({ color: 0xfacc15 }));
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.7, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.18 }));
+  g.add(bill, band, glow);
+  return g;
+}
+
+function makeStarMesh() {
+  const shape = new THREE.Shape();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? 0.85 : 0.38;
+    const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    if (i === 0) shape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    else shape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
   }
+  shape.closePath();
+  const mesh = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.22, bevelEnabled: false }),
+    new THREE.MeshStandardMaterial({ color: 0xffd166, roughness: 0.3, metalness: 0.6, emissive: 0x664400 }));
+  return mesh;
+}
 
-  _placeOnSidewalk() {
-    for (let tries = 0; tries < 20; tries++) {
-      const road = this.rng.pick([-92, -46, 0, 46, 92]);
-      const along = this.rng.range(-108, 108);
-      const side = this.rng.chance(0.5) ? 1 : -1;
-      const x = this.rng.chance(0.5) ? road + side * 8.4 : along;
-      const z = this.rng.chance(0.5) ? along : road + side * 8.4;
-      if (!this.city.insideBuilding(x, z, 1.5)) return { x, z };
-    }
-    return { x: 0, z: -8 };
+export function spawnCollectibles(G) {
+  const { rng } = G;
+  for (let i = 0; i < COLLECTIBLES.cashCount; i++) {
+    const street = G.city.streets[Math.floor(rng.next() * G.city.streets.length)];
+    const along = rng.range(-165, 165);
+    const horizontal = rng.chance(0.5);
+    const mesh = makeCashMesh();
+    mesh.position.set(horizontal ? along : street + rng.range(-6, 6), 0.9, horizontal ? street + rng.range(-6, 6) : along);
+    G.scene.add(mesh);
+    G.pickups.push({ mesh, kind: 'cash', value: rng.int(COLLECTIBLES.cashMin, COLLECTIBLES.cashMax), spin: rng.range(0, 6) });
   }
-
-  _spawn() {
-    // Cash pickups: spinning green bills.
-    for (let i = 0; i < 16; i++) {
-      const p = this._placeOnSidewalk();
-      const g = new THREE.Group();
-      const bill = new THREE.Mesh(
-        new THREE.BoxGeometry(0.9, 0.04, 0.45),
-        new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x16a34a, emissiveIntensity: 0.6, roughness: 0.5 }),
-      );
-      g.add(bill);
-      g.position.set(p.x, 0.8, p.z);
-      this.scene.add(g);
-      this.items.push({ group: g, kind: 'cash', value: this.rng.pick(ECONOMY.pickupCash), taken: false });
-    }
-    // Palm coins: golden discs, one per district corner and along the beach.
-    for (let i = 0; i < ECONOMY.collectibleCount; i++) {
-      const p = i < 4
-        ? { x: [-100, 100][i % 2], z: [-100, 100][Math.floor(i / 2) % 2] }
-        : this._placeOnSidewalk();
-      const g = new THREE.Group();
-      const coin = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.55, 0.55, 0.1, 20),
-        new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xb45309, emissiveIntensity: 0.7, roughness: 0.25, metalness: 0.9 }),
-      );
-      coin.rotation.x = Math.PI / 2;
-      g.add(coin);
-      g.position.set(p.x, 1.0, p.z);
-      this.scene.add(g);
-      this.items.push({ group: g, kind: 'coin', value: 0, taken: false });
-    }
+  for (let i = 0; i < COLLECTIBLES.starCount; i++) {
+    const mesh = makeStarMesh();
+    const x = rng.range(-160, 160), z = rng.range(-160, 160);
+    mesh.position.set(x, 1.2, z);
+    G.scene.add(mesh);
+    G.pickups.push({ mesh, kind: 'star', value: COLLECTIBLES.starValue, spin: rng.range(0, 6) });
   }
+}
 
-  update(dt, now, pos, onCollect) {
-    for (const item of this.items) {
-      if (item.taken) continue;
-      item.group.rotation.y += dt * 2;
-      item.group.position.y = (item.kind === 'coin' ? 1.0 : 0.8) + Math.sin(now * 2 + item.group.position.x) * 0.15;
-      const d = Math.hypot(item.group.position.x - pos.x, item.group.position.z - pos.z);
-      if (d < 2.2) {
-        item.taken = true;
-        this.scene.remove(item.group);
-        if (item.kind === 'coin') this.coinsCollected += 1;
-        onCollect(item);
+export function updateCollectibles(G, dt) {
+  const p = G.player.pos;
+  for (const item of [...G.pickups]) {
+    item.spin += dt * 2.2;
+    item.mesh.rotation.y = item.spin;
+    item.mesh.position.y = (item.kind === 'star' ? 1.2 : 0.9) + Math.sin(G.time * 2 + item.spin) * 0.18;
+    const d = Math.hypot(item.mesh.position.x - p.x, item.mesh.position.z - p.z);
+    if (d < 2.6) {
+      G.player.cash += item.value;
+      if (item.kind === 'star') {
+        G.player.armor = Math.min(100, G.player.armor + 25);
+        G.showMessage(`Bintang Palm +$${item.value} & +25 armor!`);
+      } else {
+        G.showMessage(`+$${item.value} uang jalanan`);
       }
+      G.audio.chime();
+      G.scene.remove(item.mesh);
+      G.pickups.splice(G.pickups.indexOf(item), 1);
     }
-  }
-
-  get coinsLeft() {
-    return this.items.filter((i) => i.kind === 'coin' && !i.taken).length;
   }
 }

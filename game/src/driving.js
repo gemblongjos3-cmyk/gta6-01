@@ -1,132 +1,96 @@
 // Palm Shores — driving.js
-// Car handling: arcade physics with per-type top speed, acceleration and
-// turn rate, speed-scaled steering, braking and a little drift; entering
-// and exiting cars; and the chase camera that swings behind the car.
+// One job: car handling — acceleration, steering that bites harder at speed,
+// braking, collisions with buildings and other cars, and the chase camera.
+export function updateDriving(G, dt) {
+  const { input, player } = G;
+  const car = player.car;
+  if (!car) return;
+  const t = car.type;
+  const mouse = input.consumeMouse();
+  G.camYaw -= mouse.dx * 0.0032;
+  G.camPitch = Math.max(0.05, Math.min(0.6, G.camPitch + mouse.dy * 0.0022));
 
-import * as THREE from 'three';
+  let throttle = 0;
+  if (input.is('forward')) throttle = 1;
+  if (input.is('back')) throttle = car.speed > 0.5 ? -1 : -0.55; // brake, then reverse
+  // Steering: full lock at low speed, gentler at top speed so it stays drivable.
+  const steerTarget = (input.is('left') ? 1 : 0) - (input.is('right') ? 1 : 0);
+  const speedFactor = 1 / (1 + Math.abs(car.speed) * 0.045);
+  car.steer += (steerTarget * t.grip * 0.55 * speedFactor - car.steer) * Math.min(1, dt * 8);
+  car.speed += throttle * t.accel * dt;
+  car.speed -= car.speed * 0.35 * dt; // drag + rolling resistance
+  if (input.is('back') && car.speed < 0) car.speed = Math.max(car.speed, -t.topSpeed * 0.4);
+  car.speed = Math.max(-t.topSpeed * 0.45, Math.min(t.topSpeed, car.speed));
+  if (Math.abs(car.speed) < 0.08 && throttle === 0) car.speed = 0;
 
-export class Driving {
-  constructor(scene, city, traffic) {
-    this.scene = scene;
-    this.city = city;
-    this.traffic = traffic;
-    this.car = null;        // current car group, or null when on foot
-    this.camYaw = 0;        // chase camera yaw (smoothed)
-    this.speedKmh = 0;
+  car.heading += car.steer * (car.speed / t.topSpeed) * dt * 2.4 * Math.sign(car.speed || 1);
+  const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+  const nx = car.pos.x + fx * car.speed * dt;
+  const nz = car.pos.z + fz * car.speed * dt;
+  // Building collision: slide along the wall instead of stopping dead.
+  if (!G.hitsBuilding(nx, car.pos.z)) car.pos.x = nx;
+  else if (Math.abs(car.speed) > 6) { G.crashCar(car); }
+  if (!G.hitsBuilding(car.pos.x, nz)) car.pos.z = nz;
+  else if (Math.abs(car.speed) > 6) { G.crashCar(car); }
+  car.pos.x = Math.max(-195, Math.min(195, car.pos.x));
+  car.pos.z = Math.max(-195, Math.min(184, car.pos.z));
+  car.mesh.rotation.y = car.heading;
+  // Body roll into corners + a little bounce sells the speed.
+  car.mesh.rotation.z = -car.steer * 0.05 * Math.sign(car.speed || 1);
+  const spin = car.speed * dt * 2.4;
+  for (const w of car.mesh.userData.wheels) {
+    w.rotation.x += spin;
+    w.rotation.y = 0;
   }
-
-  get driving() { return this.car !== null; }
-
-  enter(carGroup) {
-    this.traffic.removeFromTraffic(carGroup);
-    this.car = carGroup;
-    const c = carGroup.userData.car;
-    c.speed = 0;
-    c.steer = 0;
-    this.camYaw = carGroup.rotation.y;
-    return c.spec.label;
-  }
-
-  exit(player) {
-    if (!this.car) return;
-    const g = this.car;
-    const side = new THREE.Vector3(Math.cos(g.rotation.y), 0, -Math.sin(g.rotation.y));
-    player.pos.set(g.position.x + side.x * 2.4, 0, g.position.z + side.z * 2.4);
-    player.group.position.copy(player.pos);
-    player.group.visible = true;
-    // Leave the car parked where it stopped; it stays stealable.
-    this.traffic.stealables.push(g);
-    this.traffic.parked.push(g);
-    this.car = null;
-    this.speedKmh = 0;
-  }
-
-  update(dt, input, camera, player, onCollision) {
-    if (!this.car) return;
-    const g = this.car;
-    const c = g.userData.car;
-    const spec = c.spec;
-
-    const axes = input.moveAxes();
-    const throttle = axes.y; // W forward, S brake/reverse
-    const steerInput = -axes.x; // A left, D right (relative to facing)
-
-    // Steering: full lock at low speed, less at high speed, with smoothing.
-    // Space is the handbrake: it kills speed fast and sharpens the turn
-    // so the car can swing around a corner.
-    const handbrake = input.down('Space') && Math.abs(c.speed) > 2;
-    const speedFactor = THREE.MathUtils.clamp(Math.abs(c.speed) / spec.top, 0, 1);
-    const targetSteer = steerInput * spec.turn * (1 - speedFactor * 0.55) * (handbrake ? 1.6 : 1);
-    c.steer += (targetSteer - c.steer) * Math.min(1, dt * 8);
-
-    if (throttle > 0) c.speed += spec.accel * dt;
-    else if (throttle < 0) {
-      if (c.speed > 0.5) c.speed -= spec.brake * dt; // braking
-      else c.speed -= spec.accel * 0.6 * dt;        // reversing
-    } else {
-      c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 6 * dt); // drag
+  // Ram other cars and pedestrians: damage, noise, and a wanted bump.
+  // (Staged screenshot scenes skip police contact so the chase keeps rolling.)
+  for (const other of G.cars) {
+    if (other === car || other.parked) continue;
+    if (G.shot && other.police) continue;
+    const d = Math.hypot(other.pos.x - car.pos.x, other.pos.z - car.pos.z);
+    if (d < 3.4 && Math.abs(car.speed) > 4) {
+      other.speed = Math.max(other.speed, car.speed * 0.55);
+      other.traffic = false; // knocked loose from its route
+      car.speed *= 0.55;
+      G.crashCar(car, true);
     }
-    if (handbrake) c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 26 * dt);
-    c.speed = THREE.MathUtils.clamp(c.speed, -spec.top * 0.45, spec.top);
-
-    // Turn only while moving; reverse flips the steering.
-    const dirSign = c.speed >= 0 ? 1 : -1;
-    g.rotation.y += c.steer * dirSign * Math.min(1, Math.abs(c.speed) / 6) * dt * 0.9;
-
-    const forward = new THREE.Vector3(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
-    const nx = g.position.x + forward.x * c.speed * dt;
-    const nz = g.position.z + forward.z * c.speed * dt;
-
-    // Building collision: slide along the wall, lose speed, thud.
-    const fixed = this.city.collide(nx, nz, 1.6);
-    const hitWall = Math.abs(fixed.x - nx) > 0.01 || Math.abs(fixed.z - nz) > 0.01;
-    if (hitWall) {
-      if (Math.abs(c.speed) > 8) onCollision?.(Math.abs(c.speed));
-      c.speed *= 0.35;
-    }
-    g.position.x = THREE.MathUtils.clamp(fixed.x, -124, 124);
-    g.position.z = THREE.MathUtils.clamp(fixed.z, -124, 138);
-
-    // Bump traffic cars: simple circle push + speed loss.
-    for (const other of this.traffic.cars) {
-      const og = other.group;
-      const d = Math.hypot(og.position.x - g.position.x, og.position.z - g.position.z);
-      if (d < 3.4 && d > 0.01) {
-        const push = (3.4 - d) / 2;
-        const px = (og.position.x - g.position.x) / d;
-        const pz = (og.position.z - g.position.z) / d;
-        og.position.x += px * push;
-        og.position.z += pz * push;
-        if (Math.abs(c.speed) > 6) {
-          onCollision?.(Math.abs(c.speed) * 0.7);
-          c.speed *= 0.7;
-        }
-      }
-    }
-
-    // Wheel spin + front-wheel steer visual.
-    const spin = (c.speed * dt) / 0.34;
-    c.wheels.forEach((w, i) => {
-      w.rotation.x += spin;
-      if (i < 2) w.rotation.y = c.steer * 0.28;
-    });
-
-    this.speedKmh = Math.abs(c.speed) * 3.6;
-
-    // Chase camera: swing behind the car, height by speed.
-    let dy = g.rotation.y - this.camYaw;
-    while (dy > Math.PI) dy -= Math.PI * 2;
-    while (dy < -Math.PI) dy += Math.PI * 2;
-    this.camYaw += dy * Math.min(1, dt * 3.2);
-    const back = 8.5 + speedFactor * 2.5;
-    const tx = g.position.x - Math.sin(this.camYaw) * back;
-    const tz = g.position.z - Math.cos(this.camYaw) * back;
-    const ty = 3.4 + speedFactor * 0.8;
-    camera.position.lerp(new THREE.Vector3(tx, ty, tz), Math.min(1, dt * 6));
-    camera.lookAt(g.position.x, g.position.y + 1.4, g.position.z);
-
-    // Keep the on-foot player hidden inside the car.
-    player.group.position.copy(g.position);
-    player.group.position.y = -2;
   }
+  for (const ped of G.peds) {
+    const d = Math.hypot(ped.pos.x - car.pos.x, ped.pos.z - car.pos.z);
+    if (d < 2.2 && Math.abs(car.speed) > 3) {
+      ped.fleeing = 3;
+      ped.health -= 60;
+      if (ped.health <= 0) G.killPed(ped, 'tabrakan');
+      else G.addWanted(1, 'Menabrak pejalan kaki');
+      G.audio.thud();
+    }
+  }
+  if (input.wasPressed('horn')) G.audio.horn();
+  G.audio.setEngine(Math.abs(car.speed) / car.type.topSpeed, true);
+}
+
+/** Chase camera: behind the car, looking slightly ahead of it. */
+export function drivingCamera(G, dt) {
+  const car = G.player.car;
+  const back = 11 + Math.abs(car.speed) * 0.09;
+  const up = 4.6 + G.camPitch * 4;
+  const tx = car.pos.x - Math.sin(car.heading) * back;
+  const tz = car.pos.z - Math.cos(car.heading) * back;
+  G.camera.position.x += (tx - G.camera.position.x) * Math.min(1, dt * 5);
+  G.camera.position.y += (up - G.camera.position.y) * Math.min(1, dt * 5);
+  G.camera.position.z += (tz - G.camera.position.z) * Math.min(1, dt * 5);
+  G.camera.lookAt(car.pos.x + Math.sin(car.heading) * 6, 1.6, car.pos.z + Math.cos(car.heading) * 6);
+}
+
+/** Third-person camera on foot: orbit around the player. */
+export function footCamera(G, dt) {
+  const p = G.player.pos;
+  const dist = 8.5;
+  const tx = p.x - Math.sin(G.camYaw) * dist * Math.cos(G.camPitch);
+  const tz = p.z - Math.cos(G.camYaw) * dist * Math.cos(G.camPitch);
+  const ty = 3.2 + Math.sin(G.camPitch) * dist;
+  G.camera.position.x += (tx - G.camera.position.x) * Math.min(1, dt * 10);
+  G.camera.position.y += (ty - G.camera.position.y) * Math.min(1, dt * 10);
+  G.camera.position.z += (tz - G.camera.position.z) * Math.min(1, dt * 10);
+  G.camera.lookAt(p.x, 1.6, p.z);
 }

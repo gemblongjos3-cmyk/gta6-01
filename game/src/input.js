@@ -1,60 +1,60 @@
 // Palm Shores — input.js
-// Keyboard + mouse state, pointer lock, and a tiny edge-triggered action
-// queue (pressed-this-frame) so one keypress means one action.
+// One job: keyboard + mouse state, nothing else. The game reads this, never the DOM directly.
+export const ACTION = {
+  FORWARD: 'forward', BACK: 'back', LEFT: 'left', RIGHT: 'right',
+  RUN: 'run', ENTER_CAR: 'enter', SHOOT: 'shoot', PAUSE: 'pause',
+  RELOAD: 'reload', HORN: 'horn',
+};
 
-export class Input {
-  constructor(canvas) {
-    this.canvas = canvas;
-    this.keys = new Set();
-    this.pressed = new Set(); // edge-triggered, cleared each frame
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    this.mouseDown = false;
-    this.clicked = false; // left click this frame
-    this.locked = false;
+const KEYMAP = {
+  KeyW: 'forward', ArrowUp: 'forward',
+  KeyS: 'back', ArrowDown: 'back',
+  KeyA: 'left', ArrowLeft: 'left',
+  KeyD: 'right', ArrowRight: 'right',
+  ShiftLeft: 'run', ShiftRight: 'run',
+  KeyE: 'enter', KeyR: 'reload', KeyH: 'horn',
+  Escape: 'pause', KeyP: 'pause',
+};
 
-    addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      this.keys.add(e.code);
-      this.pressed.add(e.code);
-      if (['Space', 'Tab'].includes(e.code)) e.preventDefault();
-    });
-    addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; });
+export function createInput(canvas) {
+  const held = new Set();
+  const pressed = new Set();
+  let mouseDX = 0, mouseDY = 0, mouseDown = false;
+  let locked = false;
 
-    canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) { this.mouseDown = true; this.clicked = true; }
-    });
-    addEventListener('mouseup', (e) => { if (e.button === 0) this.mouseDown = false; });
-    document.addEventListener('pointerlockchange', () => {
-      this.locked = document.pointerLockElement === canvas;
-    });
-    document.addEventListener('mousemove', (e) => {
-      if (this.locked) { this.mouseDX += e.movementX; this.mouseDY += e.movementY; }
-    });
+  function onKeyDown(e) {
+    const action = KEYMAP[e.code];
+    if (!action) return;
+    if (!held.has(action)) pressed.add(action);
+    held.add(action);
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
   }
-
-  down(code) { return this.keys.has(code); }
-  wasPressed(code) { return this.pressed.has(code); }
-
-  // WASD / arrows as a -1..1 pair.
-  moveAxes() {
-    const x = (this.down('KeyD') || this.down('ArrowRight') ? 1 : 0)
-            - (this.down('KeyA') || this.down('ArrowLeft') ? 1 : 0);
-    const y = (this.down('KeyW') || this.down('ArrowUp') ? 1 : 0)
-            - (this.down('KeyS') || this.down('ArrowDown') ? 1 : 0);
-    return { x, y };
+  function onKeyUp(e) { const a = KEYMAP[e.code]; if (a) held.delete(a); }
+  function onMouseMove(e) {
+    if (locked) { mouseDX += e.movementX; mouseDY += e.movementY; }
   }
+  function onMouseDown(e) { if (e.button === 0) { mouseDown = true; pressed.add('shoot'); } }
+  function onMouseUp(e) { if (e.button === 0) mouseDown = false; }
+  function onLockChange() { locked = document.pointerLockElement === canvas; }
 
-  lockPointer() {
-    if (!this.locked) this.canvas.requestPointerLock?.();
-  }
-  unlockPointer() { document.exitPointerLock?.(); }
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mouseup', onMouseUp);
+  document.addEventListener('pointerlockchange', onLockChange);
+  canvas.addEventListener('click', () => {
+    if (!locked && document.pointerLockElement !== canvas) {
+      try { canvas.requestPointerLock(); } catch { /* headless: no lock, drag still works */ }
+    }
+  });
 
-  endFrame() {
-    this.pressed.clear();
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    this.clicked = false;
-  }
+  return {
+    is(action) { return held.has(action); },
+    wasPressed(action) { return pressed.has(action); },
+    mouseDown() { return mouseDown; },
+    consumeMouse() { const d = { dx: mouseDX, dy: mouseDY }; mouseDX = 0; mouseDY = 0; return d; },
+    isLocked() { return locked; },
+    endFrame() { pressed.clear(); },
+  };
 }

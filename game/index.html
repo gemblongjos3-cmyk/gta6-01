@@ -1,72 +1,135 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="id">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Palm Shores — a neon-night open-world crime game</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0620;
-    font-family: "Segoe UI", Arial, sans-serif; color: #f2f2f8; }
-  #game-canvas { display: block; width: 100%; height: 100%; }
-  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-  #hud-top { position: absolute; top: 14px; left: 16px; display: flex; gap: 18px; align-items: center; }
-  #hud-stars { font-size: 26px; letter-spacing: 4px; color: #ffd166; text-shadow: 0 0 12px rgba(255, 60, 60, .8); }
-  #hud-stars.hot { color: #ff4040; animation: pulse .7s infinite alternate; }
-  @keyframes pulse { from { opacity: .75; } to { opacity: 1; } }
-  #hud-cash { font-size: 24px; font-weight: 800; color: #4ade80; text-shadow: 0 2px 8px #000; }
-  #hud-objective { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-    background: rgba(10, 6, 28, .75); border: 1px solid #c084fc; border-radius: 8px;
-    padding: 8px 18px; font-size: 15px; font-weight: 600; color: #e9d5ff; max-width: 60vw; text-align: center; }
-  #hud-bl { position: absolute; left: 16px; bottom: 16px; width: 230px; }
-  .hud-label { font-size: 11px; letter-spacing: 2px; color: #cbd5e1; margin: 6px 0 3px; }
-  .bar { height: 12px; background: rgba(0,0,0,.6); border: 1px solid #555; border-radius: 6px; overflow: hidden; }
-  .fill { height: 100%; width: 100%; transition: width .2s; }
-  .fill.health { background: linear-gradient(90deg, #16a34a, #4ade80); }
-  .fill.armor { background: linear-gradient(90deg, #2563eb, #38bdf8); }
-  #hud-ammo { margin-top: 8px; font-size: 15px; font-weight: 700; color: #fde68a; text-shadow: 0 2px 6px #000; }
-  #hud-br { position: absolute; right: 16px; bottom: 16px; text-align: right; }
-  #hud-speed { font-size: 26px; font-weight: 800; color: #fff; text-shadow: 0 2px 8px #000; margin-bottom: 6px; }
-  #minimap { border: 2px solid rgba(192, 132, 252, .7); border-radius: 10px; background: rgba(10,6,28,.8); }
-  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    font-size: 22px; color: rgba(255,255,255,.85); text-shadow: 0 0 6px #000; display: none; }
-  #hud-briefing { position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
-    width: min(560px, 80vw); background: rgba(10, 6, 28, .88); border-left: 4px solid #ff2e88;
-    border-radius: 8px; padding: 12px 16px; font-size: 15px; line-height: 1.5; opacity: 0; transition: opacity .4s; }
-  #hud-briefing.show { opacity: 1; }
-  #hud-toast { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%);
-    background: rgba(10, 6, 28, .85); border: 1px solid #22d3ee; border-radius: 8px;
-    padding: 8px 16px; font-size: 15px; font-weight: 600; color: #a5f3fc; opacity: 0; transition: opacity .3s; }
-  #hud-toast.show { opacity: 1; }
-  #hud-flash { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(255,0,0,.45));
-    opacity: 0; transition: opacity .1s; }
-  #hud-flash.show { opacity: 1; }
-  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; text-align: center; gap: 14px; padding: 24px;
-    background: linear-gradient(180deg, rgba(11,6,32,.82), rgba(30,8,60,.88)); pointer-events: auto; }
-  .screen h1 { font-size: 64px; letter-spacing: 6px; font-weight: 900;
-    background: linear-gradient(90deg, #ff2e88, #c084fc, #22d3ee);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-    text-shadow: 0 0 40px rgba(255, 46, 136, .35); }
-  .tagline { font-size: 17px; color: #e9d5ff; letter-spacing: 1px; }
-  .story { max-width: 620px; font-size: 15px; line-height: 1.65; color: #d6d6e8; }
-  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; font-size: 14px;
-    color: #cbd5e1; text-align: left; background: rgba(0,0,0,.35); padding: 14px 20px; border-radius: 10px; }
-  .controls b { color: #ffd166; }
-  button { pointer-events: auto; cursor: pointer; font-size: 18px; font-weight: 800; letter-spacing: 2px;
-    color: #fff; background: linear-gradient(90deg, #ff2e88, #c084fc); border: none; border-radius: 10px;
-    padding: 13px 34px; box-shadow: 0 4px 24px rgba(255, 46, 136, .45); }
-  button:hover { filter: brightness(1.15); }
-  button.secondary { background: rgba(255,255,255,.12); box-shadow: none; border: 1px solid #888; }
-  .hint { font-size: 12px; color: #94a3b8; }
-</style>
+<title>Palm Shores — Neon-Night Open-World Crime</title>
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js" } }
 </script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0618;
+    font-family: Arial, Helvetica, sans-serif; color: #f1f5f9; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  /* HUD */
+  #hud { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #topbar { position: absolute; top: 12px; left: 14px; right: 14px; display: flex; justify-content: space-between; align-items: flex-start; }
+  .panel { background: rgba(8, 10, 24, 0.72); border: 1px solid rgba(255, 46, 136, 0.35); border-radius: 10px; padding: 8px 12px; }
+  #stars { font-size: 22px; letter-spacing: 2px; }
+  #cash { font-size: 22px; font-weight: bold; color: #4ade80; }
+  #ammo { font-size: 15px; color: #fde68a; margin-top: 2px; }
+  .bar-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; }
+  .bar { width: 130px; height: 9px; background: #1e293b; border-radius: 5px; overflow: hidden; }
+  .bar > div { height: 100%; }
+  #health-fill { background: #ef4444; width: 100%; }
+  #armor-fill { background: #38bdf8; width: 50%; }
+  #objective { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); font-size: 15px;
+    background: rgba(8, 10, 24, 0.72); border: 1px solid rgba(34, 211, 238, 0.4); border-radius: 10px; padding: 8px 14px; max-width: 46vw; text-align: center; }
+  #district { font-size: 12px; color: #c4b5fd; margin-top: 2px; }
+  #minimap { position: absolute; right: 14px; bottom: 14px; width: 168px; height: 168px;
+    border: 2px solid rgba(255, 46, 136, 0.5); border-radius: 10px; background: rgba(8, 10, 24, 0.8); }
+  #speedbox { position: absolute; right: 14px; bottom: 196px; text-align: right; }
+  #speed { font-size: 26px; font-weight: bold; text-shadow: 0 2px 6px #000; }
+  #car-name { font-size: 13px; color: #fda4af; }
+  #message { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); font-size: 17px; font-weight: bold;
+    background: rgba(8, 10, 24, 0.8); border: 1px solid #facc15; border-radius: 8px; padding: 8px 16px;
+    opacity: 0; transition: opacity 0.3s; white-space: nowrap; }
+  #message.show { opacity: 1; }
+  #brief { position: absolute; left: 14px; bottom: 14px; max-width: 420px; font-size: 14px; line-height: 1.45;
+    background: rgba(20, 8, 32, 0.85); border-left: 4px solid #ff2e88; border-radius: 8px; padding: 10px 14px;
+    opacity: 0; transition: opacity 0.3s; }
+  #brief.show { opacity: 1; }
+  #crosshair { display: none; position: fixed; left: 50%; top: 50%; width: 22px; height: 22px;
+    margin: -11px 0 0 -11px; z-index: 6; pointer-events: none; }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; box-shadow: 0 0 4px #000; }
+  #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
+  #crosshair::after { left: 0; top: 10px; width: 22px; height: 2px; }
+
+  /* Full screens */
+  .screen { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 30%, rgba(60, 10, 70, 0.88), rgba(5, 3, 16, 0.94)); text-align: center; }
+  .screen.show { display: flex; }
+  .screen .box { max-width: 620px; padding: 28px; }
+  h1.title { font-size: 64px; margin: 0; letter-spacing: 4px; color: #ff2e88;
+    text-shadow: 0 0 18px #ff2e88, 0 0 42px #a855f7, 0 4px 0 #3b0764; }
+  h1.title span { color: #22d3ee; text-shadow: 0 0 18px #22d3ee, 0 0 42px #0ea5e9; }
+  .subtitle { color: #fde68a; letter-spacing: 6px; font-size: 14px; margin: 6px 0 18px; }
+  .story { font-size: 15px; line-height: 1.6; color: #e2e8f0; }
+  .controls { font-size: 13px; line-height: 1.9; color: #cbd5e1; margin: 16px 0; }
+  .controls b { color: #fff; background: #1e293b; border-radius: 4px; padding: 1px 7px; }
+  button { pointer-events: auto; cursor: pointer; font-size: 17px; font-weight: bold; color: #fff;
+    background: linear-gradient(90deg, #ff2e88, #a855f7); border: none; border-radius: 10px; padding: 12px 28px; margin: 6px; }
+  button.secondary { background: #1e293b; border: 1px solid #475569; }
+  button:hover { filter: brightness(1.2); }
+  #save-info { color: #86efac; font-size: 13px; margin-top: 8px; }
+  h2 { font-size: 40px; margin: 0 0 10px; color: #ff2e88; text-shadow: 0 0 16px #ff2e88; }
+</style>
 </head>
 <body>
-<canvas id="game-canvas"></canvas>
-<div id="hud"></div>
+<canvas id="game" aria-label="Palm Shores: open-world crime game in a neon-night coastal city"></canvas>
+<p id="status" role="status" aria-live="polite"></p>
+<div id="crosshair"></div>
+
+<div id="hud">
+  <div id="topbar">
+    <div class="panel">
+      <div id="stars">☆☆☆☆☆</div>
+      <div class="bar-row">HP <div class="bar"><div id="health-fill"></div></div></div>
+      <div class="bar-row">AR <div class="bar"><div id="armor-fill"></div></div></div>
+      <div id="district">Neon Row</div>
+    </div>
+    <div id="objective">🎯 Selamat datang di Palm Shores</div>
+    <div class="panel" style="text-align:right">
+      <div id="cash">$0</div>
+      <div id="ammo">🔫 60</div>
+    </div>
+  </div>
+  <div id="speedbox"><div id="speed"></div><div id="car-name"></div></div>
+  <canvas id="minimap" width="168" height="168"></canvas>
+  <div id="message"></div>
+  <div id="brief"></div>
+</div>
+
+<div id="screen-title" class="screen show">
+  <div class="box">
+    <h1 class="title">PALM <span>SHORES</span></h1>
+    <div class="subtitle">NEON NIGHT • OPEN WORLD • GTA-STYLE</div>
+    <p class="story">Kota pesisir yang tak pernah tidur. Hujan di jalanan neon, sirene di kejauhan,
+    dan Reno — dispatcher-mu — punya lima pekerjaan untukmu. Curi mobil, kabur dari polisi,
+    dan bawa pulang uangnya. Selamat datang di Palm Shores.</p>
+    <p class="controls">
+      <b>W A S D</b> jalan / mengemudi &nbsp; <b>Shift</b> lari &nbsp; <b>Mouse</b> arah kamera / bidik<br>
+      <b>Klik</b> tembak &nbsp; <b>E</b> masuk / keluar mobil &nbsp; <b>R</b> isi ulang &nbsp; <b>H</b> klakson<br>
+      <b>Esc / P</b> jeda &nbsp; Klik canvas untuk mengunci mouse saat membidik
+    </p>
+    <div id="title-buttons">
+      <button id="btn-start">▶ MULAI BARU</button>
+      <button id="btn-continue" class="secondary">↻ LANJUTKAN</button>
+    </div>
+    <div id="save-info"></div>
+  </div>
+</div>
+
+<div id="screen-pause" class="screen">
+  <div class="box">
+    <h2>JEDA</h2>
+    <p class="story">Palm Shores menunggumu. Progres tersimpan otomatis tiap misi selesai.</p>
+    <button id="btn-resume">▶ LANJUTKAN</button>
+    <button id="btn-quit" class="secondary">🏠 MENU UTAMA</button>
+  </div>
+</div>
+
+<div id="screen-over" class="screen">
+  <div class="box">
+    <h2>GAME OVER</h2>
+    <p class="story" id="over-reason">Tewas di jalanan.</p>
+    <p class="story">Uang dibawa pulang: <b id="over-cash">$0</b></p>
+    <button id="btn-restart">↻ MAIN LAGI</button>
+  </div>
+</div>
+
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

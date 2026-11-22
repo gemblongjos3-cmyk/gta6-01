@@ -1,37 +1,19 @@
 // Palm Shores — random.js
-// Deterministic seeded random numbers (mulberry32) so a screenshot seed
-// always rebuilds the same city, and small helpers shared by every module.
-
-export function mulberry32(seed) {
+// One job: a small seeded RNG so a ?seed=N run (and every screenshot) is deterministic.
+export function createRandom(seed) {
   let a = seed >>> 0;
-  return function next() {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-export function makeRng(seed) {
-  const next = mulberry32(seed);
+  if (a === 0) a = 0x9e3779b9;
   return {
-    next,
-    range(min, max) { return min + next() * (max - min); },
-    int(min, max) { return Math.floor(min + next() * (max - min + 1)); },
-    pick(arr) { return arr[Math.floor(next() * arr.length)]; },
-    chance(p) { return next() < p; },
-    // Deterministic pick that does not advance the stream differently
-    // depending on call order elsewhere: hash a string to a 0..1 value.
-    hash01(str) {
-      let h = 2166136261;
-      for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-      return ((h >>> 0) % 10000) / 10000;
+    seed,
+    next() {
+      a |= 0; a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     },
+    range(min, max) { return min + this.next() * (max - min); },
+    int(min, max) { return Math.floor(this.range(min, max + 1)); },
+    pick(list) { return list[Math.floor(this.next() * list.length)]; },
+    chance(p) { return this.next() < p; },
   };
-}
-
-// Parse ?seed= from the URL; default seed keeps the shipped city stable.
-export function seedFromUrl() {
-  const n = Number(new URLSearchParams(location.search).get('seed'));
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 20261120;
 }

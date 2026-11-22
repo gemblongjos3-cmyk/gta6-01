@@ -1,130 +1,114 @@
 // Palm Shores — police.js
-// Wanted level: heat rises with witnessed crimes and decays when the
-// player is out of sight; cruisers spawn, pursue, and ram; hitting a
-// cruiser or a cop raises the heat further.
-
-import * as THREE from 'three';
+// One job: the wanted system — stars rise with witnessed crime, decay when
+// quiet, and cruisers spawn, pursue and ram. A bust ends the run.
 import { WANTED } from './config.js';
-import { makeCar, updateLightBar } from './vehicles.js';
+import { createCar, removeCar } from './vehicles.js';
 
-export class Police {
-  constructor(scene, city, rng) {
-    this.scene = scene;
-    this.city = city;
-    this.rng = rng;
-    this.heat = 0;
-    this.stars = 0;
-    this.lastCrimeAt = -100;
-    this.cruisers = []; // {group, speed, stuck}
-    this.onCrime = null; // callback(stars) for HUD flashes
+export function addWanted(G, stars, reason) {
+  const before = G.wanted;
+  G.wanted = Math.min(WANTED.maxStars, G.wanted + stars);
+  G.wantedTimer = 0;
+  if (G.wanted > before) {
+    G.showMessage(`WANTED ★${G.wanted} — ${reason}`);
+    G.audio.setSiren(true);
   }
+}
 
-  addHeat(amount, kind, now) {
-    this.heat = Math.min(WANTED.heatPerStar * WANTED.maxStars, this.heat + amount);
-    this.lastCrimeAt = now;
-    const stars = this.starCount();
-    if (stars !== this.stars) {
-      this.stars = stars;
-      this.onCrime?.(stars, kind);
+export function updateWanted(G, dt) {
+  if (G.wanted <= 0) { G.audio.setSiren(false); return; }
+  const policeNear = G.nearbyPoliceCount(55) > 0;
+  const seen = policeNear || G.alarm > 0;
+  if (!seen) {
+    G.wantedTimer += dt;
+    if (G.wantedTimer >= WANTED.decaySeconds) {
+      G.wanted -= 1;
+      G.wantedTimer = 0;
+      G.showMessage(G.wanted > 0 ? `Wanted turun ke ★${G.wanted}` : 'Bersih. Polisi kehilangan jejakmu.');
+      if (G.wanted === 0) G.audio.setSiren(false);
     }
+  } else {
+    G.wantedTimer = 0;
   }
-
-  starCount() {
-    return Math.min(WANTED.maxStars, Math.floor(this.heat / WANTED.heatPerStar));
+  // Keep cruisers on the street: one per star, up to three at once.
+  const wantCruisers = Math.min(3, G.wanted);
+  const have = G.police.length;
+  if (have < wantCruisers) spawnCruiser(G);
+  if (have > wantCruisers && G.wanted === 0) {
+    for (const c of [...G.police]) despawnCruiser(G, c);
   }
+}
 
-  decay(dt, now, playerVisible) {
-    if (this.heat <= 0) return;
-    if (now - this.lastCrimeAt > WANTED.decayDelay && !playerVisible) {
-      this.heat = Math.max(0, this.heat - WANTED.decayPerSec * dt);
-      const stars = this.starCount();
-      if (stars !== this.stars) { this.stars = stars; this.onCrime?.(stars, 'decay'); }
+function spawnCruiser(G) {
+  const p = G.player.pos;
+  const angle = G.rng.range(0, Math.PI * 2);
+  const x = Math.max(-180, Math.min(180, p.x + Math.sin(angle) * 55));
+  const z = Math.max(-180, Math.min(180, p.z + Math.cos(angle) * 55));
+  const car = createCar(G, 'cruiser', x, z, Math.atan2(p.x - x, p.z - z),
+    { police: true, targetSpeed: 30 });
+  car.driver = 'ai';
+  G.police.push(car);
+  G.showMessage('Unit polisi mendekat!');
+}
+
+function despawnCruiser(G, car) {
+  const i = G.police.indexOf(car);
+  if (i >= 0) G.police.splice(i, 1);
+  removeCar(G, car);
+}
+
+export function updatePolice(G, dt) {
+  const p = G.player.pos;
+  const target = G.player.car ?? null;
+  const pack = [...G.police]; // snapshot: a cruiser may despawn mid-loop
+  for (let ci = 0; ci < pack.length; ci += 1) {
+    const cruiser = pack[ci];
+    // Each cruiser aims at a slightly different point around the player so the
+    // pack fans out instead of stacking on one spot and shoving each other.
+    const side = (ci - (G.police.length - 1) / 2) * 7;
+    const tx = (target ? target.pos.x : p.x) + side;
+    const tz = (target ? target.pos.z : p.z) + Math.abs(side) * 0.4;
+    const dx = tx - cruiser.pos.x, dz = tz - cruiser.pos.z;
+    const dist = Math.hypot(dx, dz);
+    const wantHeading = Math.atan2(dx, dz);
+    let dh = wantHeading - cruiser.heading;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    cruiser.heading += Math.max(-2.4 * dt, Math.min(2.4 * dt, dh));
+    // Faster than the player when far, easing off up close so the ram lands.
+    // Staged scenes cap the approach so cruisers trail instead of piling on.
+    const wantSpeed = G.shot
+      ? (dist > 26 ? 26 : dist > 12 ? 18 : 10)
+      : (dist > 26 ? 40 : dist > 10 ? 32 : 24);
+    cruiser.speed += (wantSpeed - cruiser.speed) * Math.min(1, dt * 1.6);
+    cruiser.pos.x += Math.sin(cruiser.heading) * cruiser.speed * dt;
+    cruiser.pos.z += Math.cos(cruiser.heading) * cruiser.speed * dt;
+    cruiser.mesh.rotation.y = cruiser.heading;
+    const spin = cruiser.speed * dt * 2.4;
+    for (const w of cruiser.mesh.userData.wheels) w.rotation.x += spin;
+    // Light bar strobes.
+    const bar = cruiser.mesh.userData.lightBar;
+    if (bar) {
+      const phase = Math.floor(G.time * 6) % 2 === 0;
+      bar.children[0].material.color.setHex(phase ? 0xff2020 : 0x550000);
+      bar.children[1].material.color.setHex(phase ? 0x000055 : 0x2040ff);
     }
-  }
-
-  // Is any cruiser close enough to see the player?
-  playerSeenByPolice(playerPos) {
-    return this.cruisers.some((c) =>
-      Math.hypot(c.group.position.x - playerPos.x, c.group.position.z - playerPos.z) < 26);
-  }
-
-  _spawnCruiser(playerPos) {
-    const g = makeCar('cruiser');
-    // Spawn on a road 30-45 units away from the player.
-    const road = this.rng.pick([-92, -46, 0, 46, 92]);
-    const angle = this.rng.range(0, Math.PI * 2);
-    const x = THREE.MathUtils.clamp(playerPos.x + Math.cos(angle) * 38, -115, 115);
-    const z = THREE.MathUtils.clamp(playerPos.z + Math.sin(angle) * 38, -115, 115);
-    g.position.set(x, 0, z);
-    g.rotation.y = Math.atan2(playerPos.x - x, playerPos.z - z);
-    this.scene.add(g);
-    this.cruisers.push({ group: g, speed: 0, stuck: 0, ramAt: -10 });
-  }
-
-  _despawnCruiser(c) {
-    this.scene.remove(c.group);
-    const i = this.cruisers.indexOf(c);
-    if (i >= 0) this.cruisers.splice(i, 1);
-  }
-
-  update(dt, now, playerPos, playerDriving, onRam) {
-    const want = WANTED.cruisersPerStar[this.starCount()];
-    while (this.cruisers.length < want) this._spawnCruiser(playerPos);
-    while (this.cruisers.length > want) this._despawnCruiser(this.cruisers[0]);
-
-    for (const c of this.cruisers) {
-      const g = c.group;
-      const spec = g.userData.car.spec;
-      const toPlayer = new THREE.Vector3().subVectors(playerPos, g.position);
-      toPlayer.y = 0;
-      const dist = toPlayer.length();
-      const targetYaw = Math.atan2(toPlayer.x, toPlayer.z);
-      let dy = targetYaw - g.rotation.y;
-      while (dy > Math.PI) dy -= Math.PI * 2;
-      while (dy < -Math.PI) dy += Math.PI * 2;
-      // Pursuit steering: sharper when close, gentler at speed.
-      const steer = THREE.MathUtils.clamp(dy * 1.6, -1, 1) * spec.turn * 0.55;
-      g.rotation.y += steer * dt * Math.min(1, Math.abs(c.speed) / 5 + 0.3);
-      const targetSpeed = dist > 8 ? spec.top * 0.95 : spec.top * 0.55;
-      c.speed += Math.sign(targetSpeed - c.speed) * Math.min(Math.abs(targetSpeed - c.speed), 18 * dt);
-      const forward = new THREE.Vector3(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
-      const nx = g.position.x + forward.x * c.speed * dt;
-      const nz = g.position.z + forward.z * c.speed * dt;
-      const fixed = this.city.collide(nx, nz, 1.6);
-      if (Math.abs(fixed.x - nx) > 0.01 || Math.abs(fixed.z - nz) > 0.01) {
-        c.speed *= 0.4; // scrape the wall, keep chasing
-        c.stuck += dt;
-        if (c.stuck > 2.5) { // truly stuck: respawn near the player
-          c.stuck = 0;
-          const angle = this.rng.range(0, Math.PI * 2);
-          g.position.set(
-            THREE.MathUtils.clamp(playerPos.x + Math.cos(angle) * 34, -115, 115), 0,
-            THREE.MathUtils.clamp(playerPos.z + Math.sin(angle) * 34, -115, 115));
-          g.rotation.y = Math.atan2(playerPos.x - g.position.x, playerPos.z - g.position.z);
-        }
-      } else c.stuck = 0;
-      g.position.x = THREE.MathUtils.clamp(fixed.x, -124, 124);
-      g.position.z = THREE.MathUtils.clamp(fixed.z, -124, 138);
-      const spin = (c.speed * dt) / 0.34;
-      for (const w of g.userData.car.wheels) w.rotation.x += spin;
-      updateLightBar(g, now);
-
-      // Ram: contact with the player damages them / their car. A cruiser
-      // needs 1.2 s to back off and line up the next hit, so one touch
-      // is one hit instead of a frame-by-frame shredder.
-      if (dist < 3.6 && now - c.ramAt > 1.2) {
-        c.ramAt = now;
-        onRam?.(c.speed, playerDriving);
-        c.speed *= -0.25; // bounce back off the ram
-        g.position.addScaledVector(forward, -1.2);
+    // Ram: contact with the player's car damages it; contact on foot can bust.
+    // (Staged screenshot scenes skip the damage so the chase survives capture.)
+    if (G.shot) {
+      // no-op: cruisers still close in visually
+    } else if (target) {
+      if (dist < 3.6) {
+        cruiser.speed *= 0.4;
+        target.speed *= 0.6;
+        G.crashCar(target, true);
+        G.damagePlayer(4, 'tabrakan polisi');
       }
+    } else if (dist < WANTED.bustRange && Math.abs(G.player.speed) < 2.5) {
+      G.bustedTimer += dt;
+      if (G.bustedTimer > 2.5) { G.gameOver('Tertangkap polisi — BUSTED'); return; }
+    } else {
+      G.bustedTimer = Math.max(0, G.bustedTimer - dt);
     }
-  }
-
-  // Police give up entirely (mission escape / cheat-free reset).
-  clear() {
-    this.heat = 0;
-    this.stars = 0;
-    while (this.cruisers.length) this._despawnCruiser(this.cruisers[0]);
+    if (dist > 260) despawnCruiser(G, cruiser);
   }
 }

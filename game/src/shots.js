@@ -1,95 +1,72 @@
 // Palm Shores — shots.js
-// Screenshot scene staging: ?shot=<name>&seed=<n> puts the game into a
-// fixed, deterministic pose for each judging screenshot. The main loop
-// keeps rendering (rain, neon, light bars animate) while the camera
-// stays on the staged angle.
+// One job: stage the 4 deterministic screenshot scenes behind ?shot=<name>&seed=N.
+// Each scene sets up the real game state, places the camera, and reports ready
+// through window.__shotReady once a few frames have rendered.
+import { startMission } from './missions.js';
+import { createCar } from './vehicles.js';
+import { addWanted } from './police.js';
 
-import * as THREE from 'three';
-import { Guard } from './combat.js';
-
-export function shotFromUrl() {
-  return new URLSearchParams(location.search).get('shot') || '';
+function placePlayerCar(G, x, z, heading, typeKey = 'coupe') {
+  const car = createCar(G, typeKey, x, z, heading, { parked: false });
+  car.driver = 'player';
+  G.player.car = car;
+  G.player.mesh.visible = false;
+  G.player.pos.set(x, 0, z);
+  car.speed = 18;
+  return car;
 }
 
-// Stage one scene. Returns a fixed camera pose {pos, look} or null to
-// use the normal follow camera. Mutates the live game (player, police,
-// mission) so the frame shows the real systems, not a mockup.
-export function stageShot(game, name) {
-  const { player, driving, police, missions, traffic, city, hud } = game;
-  if (name === 'cover') {
-    // Police chase at the neon Palm Court intersection: player in the
-    // pink Shores GT, two cruisers on his tail, 3 wanted stars.
-    const car = traffic.stealables.find((g) => g.userData.car.type === 'coupe')
-      || traffic.stealables[0];
-    // On road x=0, facing south (+z); cruisers behind to the north.
-    car.position.set(0, 0, -30);
-    car.rotation.y = 0;
-    driving.enter(car);
-    player.group.visible = false;
-    // Staging only: the capture runs ~20 s of virtual time and the rams
-    // would otherwise end the run with a game-over screen over the shot.
-    player.health = 1000;
-    player.armor = 500;
-    police.addHeat(75, 'chase', game.now);
-    // Force two cruisers right behind the player.
-    police._spawnCruiser(new THREE.Vector3(0, 0, -30));
-    police._spawnCruiser(new THREE.Vector3(0, 0, -30));
-    const cruiserXs = [-4, 4];
-    police.cruisers.forEach((c, i) => {
-      c.group.position.set(cruiserXs[i % cruiserXs.length], 0, -44);
-      c.group.rotation.y = 0;
-      c.speed = 18;
-    });
-    missions.start(0);
-    hud.setObjective('Escape the Shores PD — lose the cruisers');
-    return {
-      pos: new THREE.Vector3(12, 5, -48),
-      look: new THREE.Vector3(0, 1.5, -28),
-    };
+function spawnChaseCruisers(G, x, z) {
+  for (const [ox, oz, h] of [[-8, -14, 0.4], [9, -10, -0.3], [0, 16, Math.PI]]) {
+    const c = createCar(G, 'cruiser', x + ox, z + oz, h, { police: true });
+    c.driver = 'ai';
+    c.speed = 16;
+    G.police.push(c);
   }
-  if (name === 'foot') {
-    // On foot on road x=-46 in the neon Vesper Row strip, pedestrians and
-    // traffic around. Camera sits at the intersection, looking south down
-    // the road so the signs and the street read.
-    player.reset(-46, -58);
-    player.yaw = Math.PI * 0.15;
-    player.group.rotation.y = player.yaw;
-    missions.start(0);
-    hud.setObjective('Pick up the package at the Vesper bar');
-    return {
-      pos: new THREE.Vector3(-46, 6, -38),
-      look: new THREE.Vector3(-46, 1.6, -60),
-    };
+}
+
+/**
+ * Stage a named scene and return the camera setup main.js should hold.
+ * Names: cover (police chase at a neon intersection), foot (on foot in a neon
+ * district), docks (mission moment at the docks), start (title screen).
+ */
+export function stageShot(G, name) {
+  const rng = G.rng;
+  G.mode = 'play';
+  G.objective = 'Ikuti taksi kuning — jangan terlalu dekat';
+  if (name === 'start') {
+    G.mode = 'title';
+    return { fixed: true, pos: [0, 26, -95], look: [0, 4, -140], drive: false };
   }
   if (name === 'docks') {
-    // Mission moment at the docks: Pier 3, guards on the pier, marker up.
-    // Player stands on the open dock apron between piers, facing the guards;
-    // the camera sits low and close so the guards and the player both read.
-    player.reset(34, 126);
-    player.yaw = 1.1;
-    player.group.rotation.y = player.yaw;
-    // Staging only: guard fire over ~20 s of virtual time must not end
-    // the run with a game-over screen over the shot.
-    player.health = 1000;
-    player.armor = 500;
-    missions.start(3);
-    // Jump straight to the shootout stage so guards + crate marker show.
-    missions.stage = 1;
-    missions._setTarget(60, 132, 6, 'Clear the dock guards, then grab the crate');
-    for (let i = 0; i < 5; i++) {
-      const gx = 40 + (i % 3) * 9 - 8;
-      const gz = 128 + Math.floor(i / 3) * 6;
-      missions.guards.push(new Guard(game.scene, gx, gz, game.rng));
-    }
-    hud.setObjective('Clear the dock guards, then grab the crate');
-    return {
-      pos: new THREE.Vector3(30, 10, 116),
-      look: new THREE.Vector3(44, 1.5, 131),
-    };
+    startMission(G, 3); // shootout at the docks, thugs + marker already placed
+    G.player.pos.set(40, 0, 150);
+    G.player.mesh.position.set(40, 0, 150);
+    G.player.heading = Math.PI;
+    G.player.mesh.rotation.y = Math.PI;
+    G.camYaw = Math.PI;
+    addWanted(G, 2, 'Baku tembak di dermaga');
+    return { fixed: true, pos: [40, 7, 138], look: [40, 2, 168], drive: false };
   }
-  if (name === 'start') {
-    // The start screen: nothing to stage; main.js keeps the menu open.
-    return null;
+  if (name === 'foot') {
+    // On foot, mid-street: player on the z=-120 street, camera on the x=0
+    // street looking down it — buildings, peds and traffic on both sides.
+    startMission(G, 0);
+    G.player.pos.set(0, 0, -120);
+    G.player.mesh.position.set(0, 0, -120);
+    G.player.heading = 0;
+    G.player.mesh.rotation.y = 0;
+    G.camYaw = 0;
+    G.player.cash = 1250;
+    return { fixed: true, pos: [0, 4.5, -138], look: [2, 1.5, -104], drive: false };
   }
-  return null;
+  // cover: police chase at the neon intersection, wanted 3, minimap + objective live.
+  // The car runs ALONG street z=-40 (heading PI/2), never into the blocks.
+  startMission(G, 1);
+  placePlayerCar(G, 0, -40, Math.PI / 2, 'coupe');
+  spawnChaseCruisers(G, 0, -40);
+  addWanted(G, 3, 'Kejaran polisi');
+  G.player.cash = 2450;
+  G.player.health = 82;
+  return { follow: 'chase', drive: true };
 }

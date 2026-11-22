@@ -1,41 +1,43 @@
-// Palm Shores — make.fun gta6-01 entry (r18, genuine recorded build).
-// A neon-night open-world crime game: three.js city with a road grid,
-// drivable and stealable cars, traffic, pedestrians, a wanted system with
-// police cruisers and a helicopter, pistol combat, a five-mission story
-// chain from the fixer Rook, collectibles, a live minimap, synthesized
-// WebAudio sound, and a localStorage save. The game is this directory's
-// game/ folder, plain static files a desktop browser loads offline
-// (game/index.html and its ES modules, no library and no network request
-// beyond the vendored three.js), and the program hands it in. It copies
-// game/ and screenshots/ from beside this file to /output and writes
-// /output/dossier.json, the summary the judge reads, with the vendored
-// make.fun library.
+// Palm Shores — a make.fun gta6-01 entry (Node 22, standard library only).
+// The game is this directory's game/ folder: a three.js open-world crime game
+// (neon-night coastal city, on-foot + driving, wanted system, police helicopter,
+// five story missions, collectibles, synthesized WebAudio) as plain static files
+// a desktop browser loads offline. This program hands it in: it copies game/
+// and screenshots/ from beside this file to /output and writes
+// /output/dossier.json, the summary the judge reads, with the vendored make.fun
+// library. It also validates the screenshots folder first (the dossier refuses
+// a missing or oversized shot anyway, but a clear local error beats a cryptic
+// one) and logs the entry title once the dossier is written.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const shotsDir = join(here, 'screenshots');
+
+// Validate the screenshots folder: 3 or 4 JPEG/PNG renders, each under 256 KiB.
+if (!existsSync(shotsDir)) throw new Error('screenshots/ is missing — capture the 4 staged scenes first');
+const shots = readdirSync(shotsDir).filter((f) => /\.(jpe?g|png)$/i.test(f)).sort();
+if (shots.length < 3 || shots.length > 4) {
+  throw new Error(`screenshots/ holds ${shots.length} images, expected 3 or 4`);
+}
+for (const shot of shots) {
+  const size = statSync(join(shotsDir, shot)).size;
+  if (size > 262144) throw new Error(`screenshot ${shot} is ${size} bytes, over the 256 KiB cap`);
+  console.log(`screenshot ok: ${shot} (${size} bytes)`);
+}
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
-
-// Palm Shores r18: the entry is only submittable with its four staged
-// screenshots in place — warn loudly instead of shipping a bare dossier.
-const shotDir = join(here, 'screenshots');
-const shotFiles = existsSync(shotDir)
-  ? readdirSync(shotDir).filter((f) => /\.(jpe?g|png)$/i.test(f))
-  : [];
-if (shotFiles.length === 0) console.warn('[Palm Shores] no screenshots in screenshots/ — the dossier will carry none.');
-else console.log(`[Palm Shores] entry "Palm Shores" — ${shotFiles.length} screenshot(s): ${shotFiles.join(', ')}`);
+cpSync(shotsDir, join(out, 'screenshots'), { recursive: true });
 
 // The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
 // scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
@@ -51,3 +53,4 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
+console.log('Palm Shores — dossier written to', join(out, 'dossier.json'));

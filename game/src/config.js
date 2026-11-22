@@ -1,80 +1,83 @@
 // Palm Shores — config.js
-// Single source of truth for world layout, tuning and naming.
-// The city is a 5x5 block grid on a rain-slick coast; the docks and the
-// water sit along the south edge. Nothing here is copied from any
-// commercial game: district names, characters and tuning are my own.
-
-export const GAME_TITLE = 'Palm Shores';
-export const SAVE_KEY = 'palm-shores-save-v1';
-
+// One job: every tunable number, name and mission definition for the game.
+// Nothing here touches the renderer; main.js reads these values to build the world.
 export const WORLD = {
-  // Road centre lines (x and z), 5 roads each way, 46 units apart.
-  roads: [-92, -46, 0, 46, 92],
-  roadWidth: 12,
-  blockSize: 34,
-  // South edge: docks begin here, water beyond.
-  docksZ: 118,
-  waterZ: 150,
-  bounds: 130,
+  size: 400,            // city spans -200..200 on x and z
+  streetSpacing: 40,    // road grid pitch
+  roadWidth: 10,
+  dockZ: 176,           // water starts past this z
+  seaLevel: 0.05,
 };
 
 export const DISTRICTS = [
-  { name: 'Vesper Row',      cx: -69, cz: -69, color: '#ff2e88' }, // neon bar strip
-  { name: 'Marina District', cx:  69, cz: -69, color: '#22d3ee' }, // towers, hotels
-  { name: 'Coral Heights',   cx: -69, cz:  69, color: '#f59e0b' }, // apartments
-  { name: 'The Docks',       cx:  69, cz:  69, color: '#a3e635' }, // containers, cranes
-  { name: 'Palm Court',      cx:   0, cz:   0, color: '#c084fc' }, // downtown core
+  { name: 'Neon Row',    x: 0,   z: -140, color: '#ff2e88' },
+  { name: 'Downtown',    x: 0,   z: 0,    color: '#22d3ee' },
+  { name: 'Palm Heights',x: 140, z: -40,  color: '#facc15' },
+  { name: 'Vice Mile',   x: -140,z: 40,   color: '#a855f7' },
+  { name: 'Old Docks',   x: 0,   z: 170,  color: '#34d399' },
+  { name: 'Coral Bay',   x: -140,z: -120, color: '#fb923c' },
 ];
 
-export const NIGHT = {
-  sky: 0x0b0620,        // deep violet night
-  fog: 0x140a2e,
-  fogNear: 60,
-  fogFar: 260,
-  ambient: 0x33406e,
-  moon: 0xbfd0ff,
-  ground: 0x0d0d14,
+/** Vehicle types: handling differs per type, so stealing the right car matters. */
+export const VEHICLE_TYPES = {
+  sedan:   { name: 'Comet Sedan',  topSpeed: 34, accel: 16, grip: 2.6, color: 0x3b82f6 },
+  coupe:   { name: 'Vortex Coupe', topSpeed: 44, accel: 22, grip: 3.1, color: 0xff2e63 },
+  taxi:    { name: 'Shore Taxi',   topSpeed: 30, accel: 14, grip: 2.4, color: 0xfacc15 },
+  van:     { name: 'Cargo Van',    topSpeed: 26, accel: 11, grip: 2.0, color: 0x94a3b8 },
+  muscle:  { name: 'Night Muscle', topSpeed: 40, accel: 20, grip: 2.7, color: 0x7c3aed },
+  cruiser: { name: 'PD Cruiser',   topSpeed: 38, accel: 19, grip: 3.0, color: 0x111827 },
 };
 
-export const PLAYER_TUNING = {
+export const PLAYER = {
   walkSpeed: 6,
   runSpeed: 11,
   health: 100,
   armor: 50,
-  pistolAmmo: 48,
+  pistolAmmo: 60,
   pistolDamage: 34,
   pistolRange: 90,
-  pistolRate: 0.22, // seconds between shots
-};
-
-export const VEHICLE_TYPES = {
-  hatch:  { label: 'Palm Hatch',   top: 26, accel: 14, turn: 2.4, brake: 22, color: 0xffb020, mass: 1.0 },
-  sedan:  { label: 'Vesper Sedan', top: 30, accel: 16, turn: 2.2, brake: 24, color: 0x2e86ff, mass: 1.1 },
-  coupe:  { label: 'Shores GT',    top: 38, accel: 22, turn: 2.7, brake: 28, color: 0xff2e88, mass: 0.95 },
-  pickup: { label: 'Dune Pickup',  top: 28, accel: 15, turn: 2.0, brake: 22, color: 0x8a5a2b, mass: 1.4 },
-  van:    { label: 'Cargo Van',    top: 24, accel: 11, turn: 1.7, brake: 20, color: 0xe8e8e8, mass: 1.6 },
-  cruiser:{ label: 'Shores PD',    top: 34, accel: 20, turn: 2.5, brake: 26, color: 0x111827, mass: 1.2 },
+  pistolRate: 0.22,
 };
 
 export const WANTED = {
-  decayPerSec: 0.55,      // heat lost while unseen
-  decayDelay: 6,          // seconds after last crime before decay starts
-  heatPerStar: 25,
+  decaySeconds: 14,     // quiet seconds before one star fades
   maxStars: 5,
-  crimeHeat: { theft: 18, collision: 6, shot: 10, pedestrian: 22, policeHit: 30 },
-  // cruisers on the street per star level (index = stars)
-  cruisersPerStar: [0, 1, 2, 2, 3, 4],
-  heliAtStars: 4,
+  heliAt: 4,             // helicopter joins at 4 stars
+  bustRange: 3.2,        // a cruiser this close, player slow, risks a bust
 };
 
-export const ECONOMY = {
-  startCash: 120,
-  pickupCash: [25, 40, 60, 100],
-  collectibleCount: 20,
-  collectibleBonus: 150,
-};
+export const MISSIONS = [
+  {
+    id: 'm1', title: 'Misi 1 — Paket Neon',
+    brief: 'Reno: "Ambil paket di Neon Row, antar ke Old Docks. Jangan bikin ribut."',
+    kind: 'pickup-deliver', reward: 500, timeLimit: 240,
+    pickup: [24, -132], deliver: [60, 150],
+  },
+  {
+    id: 'm2', title: 'Misi 2 — Ekor Si Kuning',
+    brief: 'Reno: "Taksi kuning itu bawa buku catatan bos. Ikuti 30 detik, jangan sampai ketahuan."',
+    kind: 'tail', reward: 800, timeLimit: 150, tailSeconds: 30,
+    target: [-60, -20],
+  },
+  {
+    id: 'm3', title: 'Misi 3 — Kabur dari Panas',
+    brief: 'Reno: "Polisi sudah di ekormu. Bertahan 60 detik dan hilangkan mereka."',
+    kind: 'escape', reward: 1000, timeLimit: 90, surviveSeconds: 60,
+  },
+  {
+    id: 'm4', title: 'Misi 4 — Baku Tembak di Dermaga',
+    brief: 'Reno: "Geng Pelabuhan nunggu di dermaga. Habisi 6 orang mereka, paketnya milik kita."',
+    kind: 'shootout', reward: 1500, timeLimit: 300, killsNeeded: 6,
+    site: [40, 168],
+  },
+  {
+    id: 'm5', title: 'Misi 5 — Pelarian Terakhir',
+    brief: 'Reno: "Ini dia. Ambil Night Muscle di Vice Mile, tembus ke Coral Bay sebelum fajar."',
+    kind: 'getaway', reward: 3000, timeLimit: 150,
+    carAt: [-132, 60], extract: [-150, -130],
+  },
+];
 
-export const MISSION_REWARDS = [250, 400, 500, 800, 1500];
-
-// Dispatcher character: "Rook", a fixer who talks to the player on the radio.
-export const DISPATCHER = 'ROOK';
+export const COLLECTIBLES = { cashCount: 24, starCount: 8, cashMin: 50, cashMax: 200, starValue: 250 };
+export const TRAFFIC = { cars: 14, parked: 10, pedestrians: 18 };
+export const STEP = 1 / 60;
